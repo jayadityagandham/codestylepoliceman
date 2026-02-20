@@ -124,6 +124,80 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString()
       const activePRs = live.pullRequests.filter((pr) => pr.state === 'open' && pr.updated_at > sevenDaysAgo)
 
+      // ── Build per-contributor team stats (AR-VCS-002..012) ──
+      const teamMap: Record<string, {
+        username: string; avatar_url: string | null;
+        commits: number; linesAdded: number; linesDeleted: number;
+        prsOpened: number; prsMerged: number; prsClosed: number;
+        prAdditions: number; prDeletions: number;
+        issuesOpened: number; issuesAssigned: number;
+        avgPRDuration: number | null; activeBranches: number; status: string;
+        lastActive: string | null;
+      }> = {}
+      const ensure = (u: string, avatar?: string | null) => {
+        if (!teamMap[u]) teamMap[u] = {
+          username: u, avatar_url: avatar ?? null,
+          commits: 0, linesAdded: 0, linesDeleted: 0,
+          prsOpened: 0, prsMerged: 0, prsClosed: 0,
+          prAdditions: 0, prDeletions: 0,
+          issuesOpened: 0, issuesAssigned: 0,
+          avgPRDuration: null, activeBranches: 0, status: 'inactive',
+          lastActive: null,
+        }
+        if (avatar && !teamMap[u].avatar_url) teamMap[u].avatar_url = avatar
+      }
+      // Commits
+      for (const c of live.recentCommits) {
+        ensure(c.author, c.author_avatar)
+        teamMap[c.author].commits++
+        if (!teamMap[c.author].lastActive || c.date > teamMap[c.author].lastActive!) teamMap[c.author].lastActive = c.date
+      }
+      // Supplement from contributor list (total contributions)
+      for (const c of live.contributors) {
+        ensure(c.username, c.avatar_url)
+        // Use GitHub contributor count if it's higher (it includes ALL commits, not just recent)
+        if (c.contributions > teamMap[c.username].commits) teamMap[c.username].commits = c.contributions
+      }
+      // PRs — lines added/deleted, open/merged/closed durations
+      const prDurations: Record<string, number[]> = {}
+      for (const pr of live.pullRequests) {
+        ensure(pr.author)
+        teamMap[pr.author].prsOpened++
+        teamMap[pr.author].prAdditions += pr.additions
+        teamMap[pr.author].prDeletions += pr.deletions
+        teamMap[pr.author].linesAdded += pr.additions
+        teamMap[pr.author].linesDeleted += pr.deletions
+        if (pr.state === 'merged') {
+          teamMap[pr.author].prsMerged++
+          if (pr.merged_at) {
+            const dur = (new Date(pr.merged_at).getTime() - new Date(pr.created_at).getTime()) / 3600000
+            if (!prDurations[pr.author]) prDurations[pr.author] = []
+            prDurations[pr.author].push(dur)
+          }
+        } else if (pr.state === 'closed') {
+          teamMap[pr.author].prsClosed++
+        }
+        // Active branches = open PRs (each open PR is a branch)
+        if (pr.state === 'open') teamMap[pr.author].activeBranches++
+      }
+      for (const [u, durs] of Object.entries(prDurations)) {
+        teamMap[u].avgPRDuration = Math.round((durs.reduce((a, b) => a + b, 0) / durs.length) * 100) / 100
+      }
+      // Issues
+      for (const i of live.issues) {
+        ensure(i.author)
+        teamMap[i.author].issuesOpened++
+        if (i.assignee) {
+          ensure(i.assignee)
+          teamMap[i.assignee].issuesAssigned++
+        }
+      }
+      // Health status
+      for (const h of live.contributorHealth) {
+        if (teamMap[h.author]) teamMap[h.author].status = h.status
+      }
+      const teamStats = Object.values(teamMap).sort((a, b) => b.commits - a.commits)
+
       return NextResponse.json({
         overview: {
           totalCommits: live.overview.totalCommits,
@@ -167,8 +241,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           author_github_username: pr.author,
           opened_at: pr.created_at,
           merged_at: pr.merged_at,
-          lines_added: 0,
-          lines_deleted: 0,
+          lines_added: pr.additions,
+          lines_deleted: pr.deletions,
         })),
         issues: live.issues.slice(0, 20).map((i) => ({
           github_issue_number: i.number,
@@ -191,6 +265,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         })(),
         cycleTimeTrend: [],
         messages: [],
+        teamStats,
         liveSource: true,
       })
     } catch (e) {
@@ -306,6 +381,78 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     calculatedAt: m.calculated_at,
   }))
 
+  // ── Build per-contributor team stats (AR-VCS-002..012) ──
+  const dbTeamMap: Record<string, {
+    username: string; avatar_url: string | null;
+    commits: number; linesAdded: number; linesDeleted: number;
+    prsOpened: number; prsMerged: number; prsClosed: number;
+    prAdditions: number; prDeletions: number;
+    issuesOpened: number; issuesAssigned: number;
+    avgPRDuration: number | null; activeBranches: number; status: string;
+    lastActive: string | null;
+  }> = {}
+  const ensureDB = (u: string) => {
+    if (!dbTeamMap[u]) dbTeamMap[u] = {
+      username: u, avatar_url: null,
+      commits: 0, linesAdded: 0, linesDeleted: 0,
+      prsOpened: 0, prsMerged: 0, prsClosed: 0,
+      prAdditions: 0, prDeletions: 0,
+      issuesOpened: 0, issuesAssigned: 0,
+      avgPRDuration: null, activeBranches: 0, status: 'inactive',
+      lastActive: null,
+    }
+  }
+  for (const c of commits ?? []) {
+    const k = c.author_github_username ?? 'unknown'
+    ensureDB(k)
+    dbTeamMap[k].commits++
+    dbTeamMap[k].linesAdded += c.lines_added ?? 0
+    dbTeamMap[k].linesDeleted += c.lines_deleted ?? 0
+    if (!dbTeamMap[k].lastActive || c.committed_at > dbTeamMap[k].lastActive!) dbTeamMap[k].lastActive = c.committed_at
+  }
+  const dbPRDurations: Record<string, number[]> = {}
+  for (const pr of prs ?? []) {
+    const k = pr.author_github_username ?? 'unknown'
+    ensureDB(k)
+    dbTeamMap[k].prsOpened++
+    dbTeamMap[k].prAdditions += pr.lines_added ?? 0
+    dbTeamMap[k].prDeletions += pr.lines_deleted ?? 0
+    if (pr.state === 'merged' || pr.merged_at) {
+      dbTeamMap[k].prsMerged++
+      if (pr.merged_at) {
+        const dur = (new Date(pr.merged_at).getTime() - new Date(pr.opened_at).getTime()) / 3600000
+        if (!dbPRDurations[k]) dbPRDurations[k] = []
+        dbPRDurations[k].push(dur)
+      }
+    } else if (pr.state === 'closed') {
+      dbTeamMap[k].prsClosed++
+    }
+    if (pr.state === 'open') dbTeamMap[k].activeBranches++
+  }
+  for (const [u, durs] of Object.entries(dbPRDurations)) {
+    dbTeamMap[u].avgPRDuration = Math.round((durs.reduce((a, b) => a + b, 0) / durs.length) * 100) / 100
+  }
+  for (const i of issues ?? []) {
+    if (i.assignee_github_username) {
+      ensureDB(i.assignee_github_username)
+      dbTeamMap[i.assignee_github_username].issuesAssigned++
+    }
+  }
+  // Resolve avatars from members
+  for (const m of members ?? []) {
+    const gu = (m.user as { github_username?: string })?.github_username
+    if (gu && dbTeamMap[gu]) dbTeamMap[gu].avatar_url = (m.user as { avatar_url?: string })?.avatar_url ?? null
+  }
+  // Activity status
+  const nowDB = Date.now()
+  for (const t of Object.values(dbTeamMap)) {
+    if (t.lastActive) {
+      const hrs = (nowDB - new Date(t.lastActive).getTime()) / 3600000
+      t.status = hrs <= 48 ? 'active' : hrs <= 168 ? 'moderate' : 'inactive'
+    }
+  }
+  const dbTeamStats = Object.values(dbTeamMap).sort((a, b) => b.commits - a.commits)
+
   return NextResponse.json({
     overview: {
       totalCommits: totalCommits ?? 0,
@@ -326,5 +473,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     wipPerUser,
     cycleTimeTrend,
     messages: messages ?? [],
+    teamStats: dbTeamStats,
   })
 }

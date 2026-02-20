@@ -601,6 +601,8 @@ export interface LivePR {
   updated_at: string
   merged_at: string | null
   closed_at: string | null
+  additions: number
+  deletions: number
 }
 
 export interface LiveIssue {
@@ -695,6 +697,8 @@ export async function fetchLivePRs(token: string, owner: string, repo: string): 
       updated_at: pr.updated_at,
       merged_at: pr.merged_at,
       closed_at: pr.closed_at,
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
     }))
   } catch {
     return []

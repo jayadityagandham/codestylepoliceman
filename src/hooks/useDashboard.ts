@@ -25,6 +25,15 @@ interface DashboardData {
   wipPerUser: Array<{ username: string; count: number }>
   cycleTimeTrend: Array<{ pullRequestId: string; codingTime: number | null; pickupTime: number | null; reviewTime: number | null; deploymentTime: number | null; totalCycleTime: number | null; calculatedAt: string }>
   messages: Array<{ id: string; source: string; channel_name: string; author_username: string; content: string; sent_at: string; intent: string | null; entities: Record<string, unknown> | null }>
+  teamStats?: Array<{
+    username: string; avatar_url: string | null;
+    commits: number; linesAdded: number; linesDeleted: number;
+    prsOpened: number; prsMerged: number; prsClosed: number;
+    prAdditions: number; prDeletions: number;
+    issuesOpened: number; issuesAssigned: number;
+    avgPRDuration: number | null; activeBranches: number; status: string;
+    lastActive: string | null;
+  }>
   liveSource?: boolean
 }
 
