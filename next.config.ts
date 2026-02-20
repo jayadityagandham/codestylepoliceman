@@ -1,8 +1,12 @@
 import type { NextConfig } from "next";
-import path from "node:path";
 
-// Loader path from orchids-visual-edits - use direct resolve to get the actual file
-const loaderPath = require.resolve('orchids-visual-edits/loader.js');
+// Orchids visual-edits loader — only used in development
+let loaderPath: string | undefined;
+try {
+  loaderPath = require.resolve('orchids-visual-edits/loader.js');
+} catch {
+  // Not available in production builds
+}
 
 const nextConfig: NextConfig = {
   images: {
@@ -17,7 +21,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  outputFileTracingRoot: path.resolve(__dirname, '../../'),
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -43,7 +46,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
               "font-src 'self'",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.groq.com https://generativelanguage.googleapis.com",
               "frame-ancestors 'none'",
             ].join('; '),
           },
@@ -60,13 +63,15 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  turbopack: {
-    rules: {
-      "*.{jsx,tsx}": {
-        loaders: [loaderPath]
+  ...(loaderPath ? {
+    turbopack: {
+      rules: {
+        "*.{jsx,tsx}": {
+          loaders: [loaderPath]
+        }
       }
     }
-  }
+  } : {}),
 } as NextConfig;
 
 export default nextConfig;
