@@ -10,7 +10,8 @@ import {
   Shield, RefreshCw, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
   ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus,
-  Pencil, Mail, Calendar, Save, KeyRound
+  Pencil, Mail, Calendar, Save, KeyRound, Sparkles, Target, ListTodo, Flag,
+  Brain, Rocket, ShieldAlert, TrendingDown, Award, CircleDot
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -19,7 +20,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 
-type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'settings'
+type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'settings' | 'ai-insights'
 
 const SEVERITY_CONFIG = {
   critical: { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-400/10 border-red-400/30' },
@@ -385,6 +386,31 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [wsNameSaving, setWsNameSaving] = useState(false)
   const [deletingWorkspace, setDeletingWorkspace] = useState(false)
   const [notifPrefs, setNotifPrefs] = useState({ alerts: true, messages: true, heuristics: true })
+  // AI Insights state
+  interface AiSummaryData {
+    projectSummary?: string
+    statisticsOverview?: {
+      totalCommits?: number
+      activeDevelopers?: number
+      openPRs?: number
+      openIssues?: number
+      mergedPRs?: number
+      codeVelocity?: string
+    }
+    commitInsights?: string[]
+    teamAnalysis?: Array<{ member: string; role: string; contribution: string; status: string }>
+    achievements?: Array<{ title: string; description: string; date?: string }>
+    pendingTasks?: Array<{ title: string; priority: string; source: string; assignee?: string }>
+    deadlines?: Array<{ title: string; date: string; status: string; notes?: string }>
+    progressEstimate?: { percentage: number; reasoning: string }
+    risks?: Array<{ title: string; severity: string; description: string }>
+    recommendations?: string[]
+    sprintSuggestion?: { focus: string; goals?: string[]; estimatedDuration?: string }
+  }
+  const [aiSummary, setAiSummary] = useState<AiSummaryData | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null)
 
   // Derive admin status from members data
   const isAdmin = data?.members?.some((m) => m.user?.id === user?.id && m.role === 'admin') ?? false
@@ -470,6 +496,33 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     finally { setHeuristicsLoading(false) }
   }
 
+  const fetchAiSummary = async () => {
+    if (!token || aiLoading) return
+    setAiLoading(true)
+    setAiError(null)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/ai-summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const d = await res.json()
+      if (res.ok && d.summary) {
+        setAiSummary(d.summary)
+        setAiGeneratedAt(d.generatedAt)
+      } else {
+        setAiError(d.error || 'Failed to generate AI summary')
+      }
+    } catch { setAiError('Failed to connect to AI service') }
+    finally { setAiLoading(false) }
+  }
+
+  // Auto-fetch AI summary when switching to AI Insights tab
+  useEffect(() => {
+    if (tab === 'ai-insights' && !aiSummary && !aiLoading && !aiError) {
+      fetchAiSummary()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
+
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'commits', label: 'Commits', icon: GitCommit },
@@ -480,6 +533,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     { id: 'team', label: `Team${data?.teamStats?.length ? ` (${data.teamStats.length})` : ''}`, icon: Users },
     { id: 'messages', label: `Messages${realtimeMessages.length ? ` (${realtimeMessages.length})` : ''}`, icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Shield },
+    { id: 'ai-insights', label: 'AI Insights', icon: Sparkles },
   ]
 
   // AR-VCS-013/014: Fetch the list of repos accessible to the user
@@ -2224,6 +2278,335 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* AI INSIGHTS TAB */}
+        {tab === 'ai-insights' && (
+          <div className="max-w-4xl space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" /> AI Project Insights
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Powered by Google Gemini — analyzes commits, PRs, issues, messages, and team activity
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {aiGeneratedAt && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Generated {formatDistanceToNow(new Date(aiGeneratedAt), { addSuffix: true })}
+                  </span>
+                )}
+                <button
+                  onClick={fetchAiSummary}
+                  disabled={aiLoading}
+                  className="px-3 py-1.5 bg-purple-500/10 text-purple-400 border border-purple-500/30 rounded-lg text-xs font-medium hover:bg-purple-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {aiLoading ? (
+                    <><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Analyzing...</>
+                  ) : (
+                    <><RefreshCw className="w-3 h-3" /> {aiSummary ? 'Regenerate' : 'Generate'}</>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {aiLoading && !aiSummary && (
+              <div className="bg-card border border-border rounded-xl p-12 flex flex-col items-center gap-4">
+                <div className="relative">
+                  <div className="w-12 h-12 border-3 border-purple-500/30 border-t-purple-400 rounded-full animate-spin" />
+                  <Brain className="w-5 h-5 text-purple-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium text-foreground">Analyzing your project...</p>
+                  <p className="text-xs text-muted-foreground mt-1">AI is reviewing commits, PRs, issues, messages, and team activity</p>
+                </div>
+              </div>
+            )}
+
+            {aiError && (
+              <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-5 flex items-start gap-3">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-red-400">Failed to generate AI summary</p>
+                  <p className="text-xs text-muted-foreground mt-1">{aiError}</p>
+                  <button onClick={fetchAiSummary} className="text-xs text-purple-400 hover:underline mt-2">Try again</button>
+                </div>
+              </div>
+            )}
+
+            {aiSummary && (
+              <div className="space-y-5">
+                {/* Project Summary */}
+                <div className="bg-linear-to-br from-purple-500/5 via-card to-indigo-500/5 border border-purple-500/20 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Brain className="w-4 h-4 text-purple-400" />
+                    <h3 className="text-sm font-semibold text-foreground">Project Summary</h3>
+                  </div>
+                  <p className="text-sm text-foreground/90 leading-relaxed">
+                    {aiSummary.projectSummary ?? 'No summary available'}
+                  </p>
+                </div>
+
+                {/* Statistics Grid */}
+                {aiSummary.statisticsOverview != null && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[
+                      { label: 'Total Commits', value: aiSummary.statisticsOverview.totalCommits, icon: GitCommit, color: 'text-emerald-400' },
+                      { label: 'Active Developers', value: aiSummary.statisticsOverview.activeDevelopers, icon: Users, color: 'text-blue-400' },
+                      { label: 'Open PRs', value: aiSummary.statisticsOverview.openPRs, icon: GitPullRequest, color: 'text-orange-400' },
+                      { label: 'Open Issues', value: aiSummary.statisticsOverview.openIssues, icon: AlertCircle, color: 'text-yellow-400' },
+                      { label: 'Merged PRs', value: aiSummary.statisticsOverview.mergedPRs, icon: CheckCircle, color: 'text-green-400' },
+                    ].map((stat) => (
+                      <div key={stat.label} className="bg-card border border-border rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{stat.label}</span>
+                          <stat.icon className={`w-3.5 h-3.5 ${stat.color}`} />
+                        </div>
+                        <p className="text-xl font-bold text-foreground">{String(stat.value ?? '—')}</p>
+                      </div>
+                    ))}
+                    <div className="bg-card border border-border rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Code Velocity</span>
+                        <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
+                      </div>
+                      <p className="text-xs text-foreground leading-relaxed">{aiSummary.statisticsOverview.codeVelocity ?? '—'}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Progress Estimate */}
+                {aiSummary.progressEstimate != null && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Target className="w-4 h-4 text-indigo-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Project Progress</h3>
+                    </div>
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="flex-1">
+                        <div className="h-3 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-linear-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-1000"
+                            style={{ width: `${Math.min(100, aiSummary.progressEstimate.percentage ?? 0)}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-lg font-bold text-foreground">{aiSummary.progressEstimate.percentage ?? 0}%</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {aiSummary.progressEstimate.reasoning ?? ''}
+                    </p>
+                  </div>
+                )}
+
+                {/* Team Analysis */}
+                {aiSummary.teamAnalysis && aiSummary.teamAnalysis.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl overflow-hidden">
+                    <div className="px-5 py-4 border-b border-border flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Team Analysis</h3>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {aiSummary.teamAnalysis.map((member, i) => (
+                        <div key={i} className="px-5 py-3.5 flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-foreground">@{member.member ?? 'unknown'}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{member.role ?? ''}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">{member.contribution ?? ''}</p>
+                          </div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${
+                            member.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
+                            member.status === 'moderate' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30' :
+                            'bg-red-500/10 text-red-400 border border-red-500/30'
+                          }`}>
+                            {member.status ?? 'unknown'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Commit Insights */}
+                {aiSummary.commitInsights && aiSummary.commitInsights.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <GitCommit className="w-4 h-4 text-emerald-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Commit Insights</h3>
+                    </div>
+                    <ul className="space-y-2">
+                      {aiSummary.commitInsights.map((insight, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-foreground/90">
+                          <CircleDot className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
+                          <span>{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Achievements */}
+                {aiSummary.achievements && aiSummary.achievements.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Award className="w-4 h-4 text-yellow-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Achievements</h3>
+                    </div>
+                    <div className="space-y-3">
+                      {aiSummary.achievements.map((ach, i) => (
+                        <div key={i} className="flex items-start gap-3 bg-yellow-500/5 border border-yellow-500/10 rounded-lg p-3">
+                          <CheckCircle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-xs font-medium text-foreground">{ach.title}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{ach.description}</p>
+                            {ach.date ? <p className="text-[10px] text-muted-foreground mt-0.5">{'\ud83d\udcc5'} {ach.date}</p> : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Tasks & Deadlines — side by side */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Pending Tasks */}
+                  {aiSummary.pendingTasks && aiSummary.pendingTasks.length > 0 && (
+                    <div className="bg-card border border-border rounded-xl p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <ListTodo className="w-4 h-4 text-orange-400" />
+                        <h3 className="text-sm font-semibold text-foreground">Pending Tasks</h3>
+                      </div>
+                      <div className="space-y-2">
+                        {aiSummary.pendingTasks.map((task, i) => (
+                          <div key={i} className="flex items-start gap-2 py-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${
+                              task.priority === 'high' ? 'bg-red-500/10 text-red-400' :
+                              task.priority === 'medium' ? 'bg-yellow-500/10 text-yellow-400' :
+                              'bg-blue-500/10 text-blue-400'
+                            }`}>
+                              {task.priority ?? 'medium'}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-xs text-foreground">{task.title}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {task.assignee && task.assignee !== 'unassigned' ? `@${task.assignee}` : 'Unassigned'} · from {task.source}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Deadlines */}
+                  {aiSummary.deadlines && aiSummary.deadlines.length > 0 && (
+                    <div className="bg-card border border-border rounded-xl p-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Calendar className="w-4 h-4 text-indigo-400" />
+                        <h3 className="text-sm font-semibold text-foreground">Deadlines</h3>
+                      </div>
+                      <div className="space-y-2">
+                        {aiSummary.deadlines.map((dl, i) => (
+                          <div key={i} className="flex items-start gap-2 py-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${
+                              dl.status === 'on-track' ? 'bg-emerald-500/10 text-emerald-400' :
+                              dl.status === 'at-risk' ? 'bg-yellow-500/10 text-yellow-400' :
+                              dl.status === 'overdue' ? 'bg-red-500/10 text-red-400' :
+                              'bg-zinc-500/10 text-zinc-400'
+                            }`}>
+                              {dl.status ?? 'unknown'}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-xs text-foreground">{dl.title}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {dl.date ?? 'Not specified'}{dl.notes ? ` — ${dl.notes}` : ''}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Risks */}
+                {aiSummary.risks && aiSummary.risks.length > 0 && (
+                  <div className="bg-card border border-red-500/10 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <ShieldAlert className="w-4 h-4 text-red-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Risks</h3>
+                    </div>
+                    <div className="space-y-2">
+                      {aiSummary.risks.map((risk, i) => (
+                        <div key={i} className="flex items-start gap-2 py-1.5 bg-red-500/5 rounded-lg px-3">
+                          <Flag className={`w-3 h-3 shrink-0 mt-0.5 ${
+                            risk.severity === 'high' ? 'text-red-400' :
+                            risk.severity === 'medium' ? 'text-yellow-400' :
+                            'text-blue-400'
+                          }`} />
+                          <div>
+                            <p className="text-xs font-medium text-foreground">{risk.title}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{risk.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {aiSummary.recommendations && aiSummary.recommendations.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Rocket className="w-4 h-4 text-cyan-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Recommendations</h3>
+                    </div>
+                    <ul className="space-y-2">
+                      {aiSummary.recommendations.map((rec, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-foreground/90">
+                          <Zap className="w-3 h-3 text-cyan-400 mt-0.5 shrink-0" />
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Sprint Suggestion */}
+                {aiSummary.sprintSuggestion != null && (
+                  <div className="bg-linear-to-br from-indigo-500/5 via-card to-purple-500/5 border border-indigo-500/20 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <TrendingUp className="w-4 h-4 text-indigo-400" />
+                      <h3 className="text-sm font-semibold text-foreground">Next Sprint Suggestion</h3>
+                      {aiSummary.sprintSuggestion.estimatedDuration ? (
+                        <span className="text-[10px] px-2 py-0.5 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/30">
+                          {aiSummary.sprintSuggestion.estimatedDuration}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-sm text-foreground/90 mb-3">
+                      <span className="font-medium">Focus:</span> {aiSummary.sprintSuggestion.focus ?? ''}
+                    </p>
+                    {aiSummary.sprintSuggestion.goals && aiSummary.sprintSuggestion.goals.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Goals</p>
+                        {aiSummary.sprintSuggestion.goals.map((goal, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs text-foreground/90">
+                            <Target className="w-3 h-3 text-indigo-400 shrink-0" />
+                            <span>{goal}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>
