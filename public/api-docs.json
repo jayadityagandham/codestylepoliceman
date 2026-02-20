@@ -1,0 +1,532 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Orchids Project Command Center API",
+    "description": "Code Style Policeman (CSP) - Team project command center for monitoring development workflow, communication, and code quality heuristics.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "CSP Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Development"
+    }
+  ],
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "summary": "Register a new user",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "email", "password"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "email": { "type": "string", "format": "email", "maxLength": 255 },
+                  "password": { "type": "string", "minLength": 8, "maxLength": 128, "description": "Must contain uppercase, lowercase, and a number" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" },
+                    "token": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "409": { "description": "Email already in use" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login with email and password",
+        "tags": ["Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" },
+                    "token": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Invalid credentials" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "summary": "Get current user info",
+        "tags": ["Authentication"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/auth/github": {
+      "get": {
+        "summary": "Initiate GitHub OAuth flow",
+        "tags": ["Authentication"],
+        "responses": {
+          "307": { "description": "Redirect to GitHub authorization" }
+        }
+      }
+    },
+    "/api/auth/discord": {
+      "get": {
+        "summary": "Initiate Discord OAuth flow",
+        "tags": ["Authentication"],
+        "responses": {
+          "307": { "description": "Redirect to Discord authorization" }
+        }
+      }
+    },
+    "/api/workspaces": {
+      "get": {
+        "summary": "List user's workspaces",
+        "tags": ["Workspaces"],
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of workspaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaces": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Workspace" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new workspace",
+        "tags": ["Workspaces"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "description": { "type": "string", "maxLength": 500 },
+                  "github_repo_url": { "type": "string", "format": "uri" },
+                  "github_repo_owner": { "type": "string" },
+                  "github_repo_name": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Workspace created" },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}": {
+      "get": {
+        "summary": "Get workspace details",
+        "tags": ["Workspaces"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": { "description": "Workspace details" },
+          "403": { "description": "Not a member" }
+        }
+      },
+      "patch": {
+        "summary": "Update workspace",
+        "tags": ["Workspaces"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": { "description": "Workspace updated" },
+          "403": { "description": "Admin only" }
+        }
+      },
+      "delete": {
+        "summary": "Delete workspace and all data (AR-NFR-007)",
+        "tags": ["Workspaces"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": { "description": "Workspace and all associated data deleted" },
+          "403": { "description": "Admin only" }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/dashboard": {
+      "get": {
+        "summary": "Get dashboard data (overview, commits, PRs, issues, alerts, bus factor, messages)",
+        "tags": ["Dashboard"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": {
+            "description": "Dashboard data",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DashboardData" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/alerts": {
+      "get": {
+        "summary": "List alerts",
+        "tags": ["Alerts"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": { "description": "List of alerts" }
+        }
+      },
+      "patch": {
+        "summary": "Resolve an alert",
+        "tags": ["Alerts"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["alert_id"],
+                "properties": {
+                  "alert_id": { "type": "string", "format": "uuid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Alert resolved" }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/heuristics": {
+      "post": {
+        "summary": "Run heuristic detection (bus factor, circular deps, stale PRs, etc.)",
+        "tags": ["Heuristics"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": {
+            "description": "Heuristics executed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "alerts_generated": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/bus-factor": {
+      "get": {
+        "summary": "Get bus factor analysis per file",
+        "tags": ["Analytics"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "responses": {
+          "200": { "description": "Bus factor data" }
+        }
+      }
+    },
+    "/api/workspaces/{workspaceId}/invite": {
+      "post": {
+        "summary": "Generate invite link (admin only)",
+        "tags": ["Invitations"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/workspaceId" }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": { "type": "string", "enum": ["member", "admin"], "default": "member" },
+                  "expires_hours": { "type": "integer", "minimum": 1, "maximum": 168, "default": 48 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Invite link generated" },
+          "403": { "description": "Admin only" }
+        }
+      }
+    },
+    "/api/workspaces/invite/join": {
+      "post": {
+        "summary": "Join a workspace via invite token",
+        "tags": ["Invitations"],
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token"],
+                "properties": {
+                  "token": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Joined workspace" }
+        }
+      }
+    },
+    "/api/webhooks/github": {
+      "post": {
+        "summary": "GitHub webhook receiver (push, pull_request, issues, deployment_status)",
+        "tags": ["Webhooks"],
+        "parameters": [
+          { "name": "workspace_id", "in": "query", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Webhook processed" },
+          "401": { "description": "Invalid signature" }
+        }
+      }
+    },
+    "/api/webhooks/discord": {
+      "post": {
+        "summary": "Discord message webhook receiver",
+        "tags": ["Webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["workspace_id", "author", "content"],
+                "properties": {
+                  "workspace_id": { "type": "string", "format": "uuid" },
+                  "channel_name": { "type": "string" },
+                  "author": { "type": "string" },
+                  "content": { "type": "string" },
+                  "timestamp": { "type": "string" },
+                  "message_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Message processed" }
+        }
+      }
+    },
+    "/api/webhooks/whatsapp": {
+      "post": {
+        "summary": "WhatsApp message relay receiver",
+        "tags": ["Webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["workspace_id", "from", "body"],
+                "properties": {
+                  "workspace_id": { "type": "string", "format": "uuid" },
+                  "from": { "type": "string" },
+                  "body": { "type": "string" },
+                  "timestamp": { "type": "string" },
+                  "group_name": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Message processed" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "workspaceId": {
+        "name": "workspaceId",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "format": "uuid" }
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string" },
+          "name": { "type": "string" },
+          "avatar_url": { "type": "string", "nullable": true },
+          "github_username": { "type": "string", "nullable": true }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "github_repo_url": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "DashboardData": {
+        "type": "object",
+        "properties": {
+          "overview": {
+            "type": "object",
+            "properties": {
+              "totalCommits": { "type": "integer" },
+              "openPRs": { "type": "integer" },
+              "openIssues": { "type": "integer" },
+              "healthScore": { "type": "integer" },
+              "avgCycleTimeSeconds": { "type": "integer", "nullable": true },
+              "totalWIP": { "type": "integer" }
+            }
+          },
+          "contributors": { "type": "array", "items": { "type": "object" } },
+          "recentCommits": { "type": "array", "items": { "type": "object" } },
+          "pullRequests": { "type": "array", "items": { "type": "object" } },
+          "issues": { "type": "array", "items": { "type": "object" } },
+          "alerts": { "type": "array", "items": { "type": "object" } },
+          "criticalFiles": { "type": "array", "items": { "type": "object" } },
+          "members": { "type": "array", "items": { "type": "object" } },
+          "healthHistory": { "type": "array", "items": { "type": "object" } },
+          "wipPerUser": { "type": "array", "items": { "type": "object" } },
+          "cycleTimeTrend": { "type": "array", "items": { "type": "object" } },
+          "messages": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "Validation error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limited",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds until rate limit resets" }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

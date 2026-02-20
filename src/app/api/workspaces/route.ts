@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-middleware'
 import { createServiceClient } from '@/lib/supabase'
+import { createWorkspaceSchema, validateBody } from '@/lib/validation'
 
 // GET /api/workspaces - list user's workspaces
 export async function GET(req: NextRequest) {
@@ -22,9 +23,9 @@ export async function POST(req: NextRequest) {
   const { user, error } = await requireAuth(req)
   if (error) return error
 
-  const body = await req.json()
-  const { name, description, github_repo_url, github_repo_owner, github_repo_name } = body
-  if (!name) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+  const { data: body, error: validationError } = await validateBody(req, createWorkspaceSchema)
+  if (validationError) return NextResponse.json({ error: validationError }, { status: 400 })
+  const { name, description, github_repo_url, github_repo_owner, github_repo_name } = body!
 
   const db = createServiceClient()
   const crypto = await import('crypto')

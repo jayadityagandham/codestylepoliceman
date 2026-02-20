@@ -4,8 +4,14 @@ import { signJWT } from '@/lib/jwt'
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
+  const state = req.nextUrl.searchParams.get('state')
+  const storedState = req.cookies.get('discord_oauth_state')?.value
+
   if (!code) {
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/login?error=no_code`)
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=no_code`)
+  }
+  if (!state || state !== storedState) {
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=invalid_state`)
   }
 
   try {
@@ -22,7 +28,7 @@ export async function GET(req: NextRequest) {
     })
     const tokenData = await tokenRes.json()
     if (!tokenData.access_token) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/login?error=oauth_failed`)
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=oauth_failed`)
     }
 
     const userRes = await fetch('https://discord.com/api/users/@me', {
@@ -50,9 +56,11 @@ export async function GET(req: NextRequest) {
     if (error) throw error
 
     const token = await signJWT({ id: user.id, email: user.email, name: user.name })
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/auth-callback?token=${token}`)
+    const redirectRes = NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/auth-callback?token=${token}`)
+    redirectRes.cookies.delete('discord_oauth_state')
+    return redirectRes
   } catch (e: unknown) {
     console.error('Discord OAuth error:', e)
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/login?error=server_error`)
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=server_error`)
   }
 }

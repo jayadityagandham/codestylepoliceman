@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase'
 import { classifyCommit } from '@/lib/semantic-analysis'
 import { calculateCycleTime } from '@/lib/heuristics'
 import { runHeuristicDetection } from '@/lib/heuristics'
+import { handleMemberEvent } from '@/lib/github-api'
 
 function verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
   const hmac = crypto.createHmac('sha256', secret)
@@ -23,20 +24,63 @@ async function handlePushEvent(db: ReturnType<typeof createServiceClient>, works
   const branch = ((payload.ref as string) ?? '').replace('refs/heads/', '')
   const repoOwner = (payload.repository as { owner?: { login?: string } })?.owner?.login ?? ''
   const repoName = (payload.repository as { name?: string })?.name ?? ''
+  const created = (payload.created as boolean) ?? false
 
-  // Upsert branch
-  await db.from('branches').upsert({
+  // Upsert branch with created_at tracking for AR-VCS-011 branch lifetime
+  const branchData: Record<string, unknown> = {
     workspace_id: workspaceId,
     name: branch,
     repo_owner: repoOwner,
     repo_name: repoName,
     author_github_username: commits[0]?.author?.username ?? null,
     last_commit_at: new Date().toISOString(),
-  }, { onConflict: 'workspace_id,name,repo_owner,repo_name' })
+  }
+  if (created) {
+    branchData.created_at = new Date().toISOString()
+  }
+  await db.from('branches').upsert(branchData, { onConflict: 'workspace_id,name,repo_owner,repo_name' })
+
+  // Fetch workspace GitHub token for commit stats API
+  const { data: wsData } = await db.from('workspaces').select('github_access_token').eq('id', workspaceId).single()
+  const ghToken = wsData?.github_access_token
 
   for (const commit of commits) {
     const allFiles = [...(commit.added ?? []), ...(commit.modified ?? []), ...(commit.removed ?? [])]
     const { type, summary, isHighImpact } = classifyCommit(commit.message, allFiles)
+
+    // AR-VCS-008/009: Fetch actual line stats from GitHub Commits API
+    let linesAdded = 0
+    let linesDeleted = 0
+    if (ghToken && repoOwner && repoName) {
+      try {
+        const statsRes = await fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/commits/${commit.id}`, {
+          headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/json' },
+        })
+        if (statsRes.ok) {
+          const statsData = await statsRes.json() as { stats?: { additions?: number; deletions?: number }; files?: Array<{ filename: string; additions: number; deletions: number }> }
+          linesAdded = statsData.stats?.additions ?? 0
+          linesDeleted = statsData.stats?.deletions ?? 0
+
+          // AR-KNOW-002/003: Update file authorship with real line counts
+          if (statsData.files) {
+            for (const file of statsData.files) {
+              await db.from('file_authorship').upsert({
+                workspace_id: workspaceId,
+                file_path: file.filename,
+                author_github_username: commit.author.username ?? commit.author.email,
+                lines_added: file.additions,
+                lines_modified: file.deletions,
+                commit_count: 1,
+                last_modified_at: commit.timestamp,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'workspace_id,file_path,author_github_username' })
+            }
+          }
+        }
+      } catch {
+        // Fallback: line stats stay 0 if API call fails
+      }
+    }
 
     await db.from('commits').upsert({
       workspace_id: workspaceId,
@@ -48,8 +92,8 @@ async function handlePushEvent(db: ReturnType<typeof createServiceClient>, works
       branch,
       repo_owner: repoOwner,
       repo_name: repoName,
-      lines_added: 0, // GitHub push events don't include line stats
-      lines_deleted: 0,
+      lines_added: linesAdded,
+      lines_deleted: linesDeleted,
       files_changed: allFiles.length,
       files_list: allFiles,
       committed_at: commit.timestamp,
@@ -59,28 +103,30 @@ async function handlePushEvent(db: ReturnType<typeof createServiceClient>, works
       raw_payload: commit as unknown as Record<string, unknown>,
     }, { onConflict: 'workspace_id,sha' })
 
-    // Update file authorship
-    for (const file of commit.modified ?? []) {
-      await db.from('file_authorship').upsert({
-        workspace_id: workspaceId,
-        file_path: file,
-        author_github_username: commit.author.username ?? commit.author.email,
-        lines_modified: 1,
-        commit_count: 1,
-        last_modified_at: commit.timestamp,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'workspace_id,file_path,author_github_username' })
-    }
-    for (const file of commit.added ?? []) {
-      await db.from('file_authorship').upsert({
-        workspace_id: workspaceId,
-        file_path: file,
-        author_github_username: commit.author.username ?? commit.author.email,
-        lines_added: 1,
-        commit_count: 1,
-        last_modified_at: commit.timestamp,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'workspace_id,file_path,author_github_username' })
+    // Fallback file authorship if no GitHub token available
+    if (!ghToken) {
+      for (const file of commit.modified ?? []) {
+        await db.from('file_authorship').upsert({
+          workspace_id: workspaceId,
+          file_path: file,
+          author_github_username: commit.author.username ?? commit.author.email,
+          lines_modified: 1,
+          commit_count: 1,
+          last_modified_at: commit.timestamp,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'workspace_id,file_path,author_github_username' })
+      }
+      for (const file of commit.added ?? []) {
+        await db.from('file_authorship').upsert({
+          workspace_id: workspaceId,
+          file_path: file,
+          author_github_username: commit.author.username ?? commit.author.email,
+          lines_added: 1,
+          commit_count: 1,
+          last_modified_at: commit.timestamp,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'workspace_id,file_path,author_github_username' })
+      }
     }
   }
 }
@@ -119,13 +165,38 @@ async function handlePREvent(db: ReturnType<typeof createServiceClient>, workspa
     prData.closed_at = pr.closed_at as string
   }
 
-  if (action === 'review_requested' || action === 'review_request_removed') {
-    prData.first_review_at = new Date().toISOString()
+  // AR-VCS-010: PR open duration & fix review_requested bug
+  if (action === 'review_requested') {
+    // Only set first_review_at if not already set
+    const { data: existingPR } = await db.from('pull_requests')
+      .select('first_review_at')
+      .eq('workspace_id', workspaceId)
+      .eq('github_pr_number', pr.number as number)
+      .eq('repo_owner', repoOwner)
+      .single()
+    if (!existingPR?.first_review_at) {
+      prData.first_review_at = new Date().toISOString()
+    }
   }
 
   await db.from('pull_requests').upsert(prData, { onConflict: 'workspace_id,github_pr_number,repo_owner,repo_name' })
 
-  // Calculate cycle time
+  // AR-FLOW-001: Get first commit on head branch for coding time calculation
+  const headBranch = (pr.head as { ref?: string })?.ref ?? null
+  let firstCommitAt: string | null = null
+  if (headBranch) {
+    const { data: firstCommit } = await db
+      .from('commits')
+      .select('committed_at')
+      .eq('workspace_id', workspaceId)
+      .eq('branch', headBranch)
+      .order('committed_at', { ascending: true })
+      .limit(1)
+      .single()
+    firstCommitAt = firstCommit?.committed_at ?? null
+  }
+
+  // Calculate cycle time with coding time
   const { data: saved } = await db
     .from('pull_requests')
     .select('id, opened_at, first_review_at, merged_at, closed_at')
@@ -135,13 +206,15 @@ async function handlePREvent(db: ReturnType<typeof createServiceClient>, workspa
     .single()
 
   if (saved) {
-    const ct = calculateCycleTime(saved)
+    const ct = calculateCycleTime({ ...saved, first_commit_at: firstCommitAt })
     if (ct.totalCycleTime !== null) {
       await db.from('cycle_time_metrics').upsert({
         workspace_id: workspaceId,
         pull_request_id: saved.id,
+        coding_time_seconds: ct.codingTime,
         pickup_time_seconds: ct.pickupTime,
         review_time_seconds: ct.reviewTime,
+        deployment_time_seconds: ct.deploymentTime,
         total_cycle_time_seconds: ct.totalCycleTime,
         exceeds_threshold: ct.exceedsThreshold,
         calculated_at: new Date().toISOString(),
@@ -171,6 +244,51 @@ async function handleIssueEvent(db: ReturnType<typeof createServiceClient>, work
     updated_at: new Date().toISOString(),
     raw_payload: issue,
   }, { onConflict: 'workspace_id,github_issue_number,repo_owner,repo_name' })
+}
+
+// AR-FLOW-004: Handle deployment_status event for deployment time tracking
+async function handleDeploymentEvent(db: ReturnType<typeof createServiceClient>, workspaceId: string, payload: Record<string, unknown>) {
+  const deploymentStatus = payload.deployment_status as Record<string, unknown>
+  const deployment = payload.deployment as Record<string, unknown>
+  const state = deploymentStatus?.state as string
+
+  if (state !== 'success') return
+
+  const sha = deployment?.sha as string
+  if (!sha) return
+
+  // Find PR that was merged with this commit
+  const { data: commit } = await db
+    .from('commits')
+    .select('branch')
+    .eq('workspace_id', workspaceId)
+    .eq('sha', sha)
+    .single()
+
+  if (commit?.branch) {
+    const { data: pr } = await db
+      .from('pull_requests')
+      .select('id, opened_at, first_review_at, merged_at, closed_at')
+      .eq('workspace_id', workspaceId)
+      .eq('head_branch', commit.branch)
+      .not('merged_at', 'is', null)
+      .order('merged_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (pr) {
+      const deployedAt = new Date().toISOString()
+      const ct = calculateCycleTime({ ...pr, deployed_at: deployedAt })
+      await db.from('cycle_time_metrics').upsert({
+        workspace_id: workspaceId,
+        pull_request_id: pr.id,
+        deployment_time_seconds: ct.deploymentTime,
+        total_cycle_time_seconds: ct.totalCycleTime,
+        exceeds_threshold: ct.exceedsThreshold,
+        calculated_at: deployedAt,
+      }, { onConflict: 'pull_request_id' })
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -206,6 +324,18 @@ export async function POST(req: NextRequest) {
       await handlePREvent(db, workspaceId, payload)
     } else if (event === 'issues') {
       await handleIssueEvent(db, workspaceId, payload)
+    } else if (event === 'deployment_status') {
+      await handleDeploymentEvent(db, workspaceId, payload)
+    } else if (event === 'member') {
+      // AR-VCS-028: Update collaborator data when repository permissions change
+      const repoOwner = (payload.repository as { owner?: { login?: string } })?.owner?.login ?? ''
+      const repoName = (payload.repository as { name?: string })?.name ?? ''
+      if (repoOwner && repoName) {
+        const { data: ws } = await db.from('workspaces').select('github_access_token').eq('id', workspaceId).single()
+        if (ws?.github_access_token) {
+          handleMemberEvent(ws.github_access_token, workspaceId, repoOwner, repoName).catch(console.error)
+        }
+      }
     }
 
     // Run heuristics asynchronously

@@ -11,7 +11,7 @@ export default function AuthCallbackPage() {
 
   useEffect(() => {
     const token = searchParams.get('token')
-    if (!token) { router.push('/login?error=no_token'); return }
+    if (!token) { router.push('/?error=no_token'); return }
 
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
