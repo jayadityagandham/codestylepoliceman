@@ -2,13 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { createServiceClient } from '@/lib/supabase'
 import { signJWT } from '@/lib/jwt'
+import { loginSchema, validateBody } from '@/lib/validation'
+import { checkRateLimit, AUTH_RATE_LIMIT } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password } = await req.json()
-    if (!email || !password) {
-      return NextResponse.json({ error: 'Missing credentials' }, { status: 400 })
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? req.headers.get('x-real-ip') ?? 'unknown'
+    const { allowed, remaining, resetAt } = checkRateLimit(ip, 'login', AUTH_RATE_LIMIT)
+    if (!allowed) {
+      return NextResponse.json({ error: 'Too many login attempts. Try again later.' }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.ceil((resetAt - Date.now()) / 1000)), 'X-RateLimit-Remaining': '0' },
+      })
     }
+
+    const { data: body, error: validationError } = await validateBody(req, loginSchema)
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 })
+    }
+    const { email, password } = body!
 
     const db = createServiceClient()
     const { data: user } = await db

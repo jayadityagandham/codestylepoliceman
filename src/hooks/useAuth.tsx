@@ -25,22 +25,57 @@ const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [token, setToken] = useState<string | null>(null)
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('token')
+    return null
+  })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('token')
-    if (storedToken) {
-      setToken(storedToken)
-      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${storedToken}` } })
-        .then((r) => r.json())
-        .then(({ user }) => { if (user) setUser(user) })
-        .catch(() => localStorage.removeItem('token'))
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
+    if (!token) { setLoading(false); return }
+
+    let cancelled = false
+    const verify = async (retries = 2): Promise<void> => {
+      try {
+        const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+        if (cancelled) return
+
+        if (r.status === 401) {
+          // Token expired or invalid — clear it
+          localStorage.removeItem('token')
+          setToken(null)
+          setLoading(false)
+          return
+        }
+
+        if (!r.ok) {
+          // Transient server error — retry
+          if (retries > 0) {
+            await new Promise((res) => setTimeout(res, 500))
+            return verify(retries - 1)
+          }
+          // Exhausted retries — keep token, stop loading so UI isn't stuck
+          setLoading(false)
+          return
+        }
+
+        const data = await r.json()
+        if (!cancelled && data?.user) setUser(data.user)
+        setLoading(false)
+      } catch {
+        // Network error (e.g. dev server restarting) — retry
+        if (retries > 0) {
+          await new Promise((res) => setTimeout(res, 500))
+          return verify(retries - 1)
+        }
+        // Exhausted retries — keep token, stop loading
+        setLoading(false)
+      }
     }
-  }, [])
+
+    verify()
+    return () => { cancelled = true }
+  }, [token])
 
   const login = async (email: string, password: string) => {
     const res = await fetch('/api/auth/login', {
