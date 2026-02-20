@@ -174,32 +174,14 @@ export default function DashboardPage() {
             {showAccountMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-72 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="p-4 border-b border-border">
-                    <div className="flex items-center gap-3">
-                      {user?.avatar_url ? (
-                        <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-full" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
-                      </div>
-                    </div>
+                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs font-semibold text-foreground truncate">{user?.name}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
                   </div>
-                  <div className="p-3 space-y-1">
-                    {user?.github_username && (
-                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                        <Github className="w-3.5 h-3.5" />
-                        <span>@{user.github_username}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="border-t border-border p-2">
-                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">
-                      <LogOut className="w-3.5 h-3.5" />
-                      Sign out
+                  <div className="p-1.5">
+                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">
+                      <LogOut className="w-3.5 h-3.5" /> Sign out
                     </button>
                   </div>
                 </div>
