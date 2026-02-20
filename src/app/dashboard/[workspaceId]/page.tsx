@@ -231,6 +231,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [repoSearch, setRepoSearch] = useState('')
   const [repoLoading, setRepoLoading] = useState(false)
   const [bindingLoading, setBindingLoading] = useState(false)
+  const [heuristicsLoading, setHeuristicsLoading] = useState(false)
+  const [resolvingAlertId, setResolvingAlertId] = useState<string | null>(null)
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [collabRefreshing, setCollabRefreshing] = useState(false)
+  const [unbindLoading, setUnbindLoading] = useState(false)
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
 
   useEffect(() => {
@@ -270,36 +275,48 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
   const generateInvite = async () => {
     if (!token) return
-    const res = await fetch(`/api/workspaces/${workspaceId}/invite`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'member', expires_hours: 48 }),
-    })
-    const data = await res.json()
-    if (res.ok) { setInviteUrl(data.invite_url); toast.success('Invite link generated (48h)') }
-    else toast.error(data.error)
+    setInviteLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/invite`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'member', expires_hours: 48 }),
+      })
+      const data = await res.json()
+      if (res.ok) { setInviteUrl(data.invite_url); toast.success('Invite link generated (48h)') }
+      else toast.error(data.error)
+    } catch { toast.error('Failed to generate invite') }
+    finally { setInviteLoading(false) }
   }
 
   const resolveAlert = async (alertId: string) => {
     if (!token) return
-    await fetch(`/api/workspaces/${workspaceId}/alerts`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alert_id: alertId }),
-    })
-    refetch()
-    toast.success('Alert resolved')
+    setResolvingAlertId(alertId)
+    try {
+      await fetch(`/api/workspaces/${workspaceId}/alerts`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alert_id: alertId }),
+      })
+      refetch()
+      toast.success('Alert resolved')
+    } catch { toast.error('Failed to resolve alert') }
+    finally { setResolvingAlertId(null) }
   }
 
   const runHeuristics = async () => {
-    if (!token) return
-    const res = await fetch(`/api/workspaces/${workspaceId}/heuristics`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const d = await res.json()
-    if (res.ok) { refetch(); toast.success(`Heuristics ran: ${d.alerts_generated} alerts`) }
-    else toast.error(d.error)
+    if (!token || heuristicsLoading) return
+    setHeuristicsLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/heuristics`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const d = await res.json()
+      if (res.ok) { refetch(); toast.success(`Heuristics ran: ${d.alerts_generated} alerts`) }
+      else toast.error(d.error)
+    } catch { toast.error('Heuristic scan failed') }
+    finally { setHeuristicsLoading(false) }
   }
 
   const exportPDF = async () => {
@@ -374,6 +391,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   // AR-VCS-028: Refresh collaborators
   const refreshCollaborators = async () => {
     if (!token) return
+    setCollabRefreshing(true)
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/collaborators`, {
         method: 'POST',
@@ -388,20 +406,25 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           .then((r) => r.json()).then((b) => setRepoBinding(b))
       } else toast.error(d.error)
     } catch { toast.error('Failed to refresh collaborators') }
+    finally { setCollabRefreshing(false) }
   }
 
   // Unbind repo
   const unbindRepo = async () => {
     if (!token) return
     if (!confirm('This will disconnect the repository from this workspace. Historical data will remain. Continue?')) return
-    const res = await fetch(`/api/workspaces/${workspaceId}/repo`, {
-      method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-    })
-    if (res.ok) {
-      toast.success('Repository unbound')
-      setRepoBinding({ bound: false, repo: null, collaborators: [], collaborators_updated_at: null })
-      setCollabInfo(null)
-    }
+    setUnbindLoading(true)
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/repo`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        toast.success('Repository unbound')
+        setRepoBinding({ bound: false, repo: null, collaborators: [], collaborators_updated_at: null })
+        setCollabInfo(null)
+      } else toast.error('Failed to unbind repo')
+    } catch { toast.error('Failed to unbind repo') }
+    finally { setUnbindLoading(false) }
   }
 
   const filteredRepos = repoList.filter((r) =>
@@ -461,14 +484,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={runHeuristics} title="Run heuristic checks" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
-            <Zap className="w-4 h-4" />
+          <button onClick={runHeuristics} disabled={heuristicsLoading} title="Run heuristic checks" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
+            {heuristicsLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Zap className="w-4 h-4" />}
           </button>
           <button onClick={refetch} disabled={loading} title="Refresh" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <button onClick={exportPDF} disabled={exportLoading} title="Export PDF" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
-            <Download className="w-4 h-4" />
+          <button onClick={exportPDF} disabled={exportLoading} title="Export PDF" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
+            {exportLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Download className="w-4 h-4" />}
           </button>
           <button onClick={logout} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded text-xs">
             Sign out
@@ -994,8 +1017,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-foreground">{data.alerts.length} Active Alert{data.alerts.length !== 1 ? 's' : ''}</h2>
-              <button onClick={runHeuristics} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
-                <Zap className="w-3 h-3" /> Run checks now
+              <button onClick={runHeuristics} disabled={heuristicsLoading} className="flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50">
+                {heuristicsLoading ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Zap className="w-3 h-3" />}
+                {heuristicsLoading ? 'Scanning...' : 'Run checks now'}
               </button>
             </div>
             {data.alerts.length === 0 ? (
@@ -1016,8 +1040,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       <p className="text-xs text-muted-foreground mt-1">{alert.description}</p>
                       <p className="text-xs text-muted-foreground mt-2">{formatDistanceToNow(new Date(alert.created_at), { addSuffix: true })}</p>
                     </div>
-                    <button onClick={() => resolveAlert(alert.id)} className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded shrink-0" title="Resolve">
-                      <X className="w-4 h-4" />
+                    <button onClick={() => resolveAlert(alert.id)} disabled={resolvingAlertId === alert.id} className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded shrink-0 disabled:opacity-50" title="Resolve">
+                      {resolvingAlertId === alert.id ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <X className="w-4 h-4" />}
                     </button>
                   </div>
                 )
@@ -1208,8 +1232,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                         </div>
                       </div>
                     </div>
-                    <button onClick={unbindRepo} className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1 rounded hover:bg-red-400/10">
-                      <X className="w-3.5 h-3.5 inline mr-1" />Unbind
+                    <button onClick={unbindRepo} disabled={unbindLoading} className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1 rounded hover:bg-red-400/10 disabled:opacity-50 flex items-center gap-1">
+                      {unbindLoading ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                      {unbindLoading ? 'Unbinding...' : 'Unbind'}
                     </button>
                   </div>
                   {/* Manual webhook info */}
@@ -1286,8 +1311,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     <h3 className="text-sm font-semibold text-foreground">Repository Collaborators ({repoBinding.collaborators?.length ?? 0})</h3>
                     {repoBinding.collaborators_updated_at && <p className="text-[10px] text-muted-foreground">Updated {formatDistanceToNow(new Date(repoBinding.collaborators_updated_at), { addSuffix: true })}</p>}
                   </div>
-                  <button onClick={refreshCollaborators} title="Refresh collaborators" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
-                    <RefreshCw className="w-3.5 h-3.5" />
+                  <button onClick={refreshCollaborators} disabled={collabRefreshing} title="Refresh collaborators" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
+                    {collabRefreshing ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   </button>
                 </div>
                 <div className="divide-y divide-border max-h-64 overflow-y-auto">
@@ -1348,8 +1373,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-4 h-4" /> Team Invitations
               </h3>
-              <button onClick={generateInvite} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors">
-                Generate Invite Link (48h)
+              <button onClick={generateInvite} disabled={inviteLoading} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2">
+                {inviteLoading && <div className="w-3 h-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />}
+                {inviteLoading ? 'Generating...' : 'Generate Invite Link (48h)'}
               </button>
               {inviteUrl && (
                 <div className="flex items-center gap-2 bg-muted rounded-lg p-3">
