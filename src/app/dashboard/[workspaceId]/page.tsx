@@ -225,7 +225,135 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [msgSearch, setMsgSearch] = useState('')
   const [msgInput, setMsgInput] = useState('')
   const [sendingMsg, setSendingMsg] = useState(false)
+  const [realtimeMessages, setRealtimeMessages] = useState<Array<{ id: string; source: string; channel_name: string; author_username: string; content: string; sent_at: string; intent: string | null; entities: Record<string, unknown> | null }>>([])
+  const pendingOptimisticIds = useRef<Set<string>>(new Set())
   const PAGE_SIZE = 10
+
+  // Sync messages: merge dashboard data into realtime state whenever it changes
+  useEffect(() => {
+    if (!data?.messages) return
+    setRealtimeMessages((prev) => {
+      // Merge: keep all realtime messages + add any from data that aren't already there
+      const existingIds = new Set(prev.map((m) => m.id))
+      const existingContents = new Set(prev.map((m) => `${m.author_username}:${m.content}:${m.sent_at?.slice(0, 16)}`))
+      const newFromData = data.messages.filter((m) => {
+        if (existingIds.has(m.id)) return false
+        // Also skip if content+author already exists (optimistic match)
+        const key = `${m.author_username}:${m.content}:${m.sent_at?.slice(0, 16)}`
+        if (existingContents.has(key)) return false
+        return true
+      })
+      if (newFromData.length === 0 && prev.length > 0) return prev
+      // Sort by sent_at descending
+      const merged = [...prev, ...newFromData].sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+      return merged
+    })
+  }, [data?.messages])
+
+  // Supabase Realtime subscription for instant message updates
+  useEffect(() => {
+    if (!workspaceId) return
+
+    const channel = supabase
+      .channel(`messages:${workspaceId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'discord_messages',
+          filter: `workspace_id=eq.${workspaceId}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>
+          const msg = {
+            id: row.id as string,
+            source: row.author_discord_id === 'app' ? 'app' : 'discord',
+            channel_name: (row.channel_name as string) ?? '',
+            author_username: row.author_username as string,
+            content: row.content as string,
+            sent_at: row.sent_at as string,
+            intent: (row.intent as string) ?? null,
+            entities: (row.entities as Record<string, unknown>) ?? null,
+          }
+          setRealtimeMessages((prev) => {
+            // If this exact id already exists, skip
+            if (prev.some((m) => m.id === msg.id)) return prev
+            // Check if there's a matching optimistic message (same content + author)
+            const optIdx = prev.findIndex((m) =>
+              m.id.startsWith('opt-') &&
+              m.content === msg.content &&
+              m.author_username === msg.author_username
+            )
+            if (optIdx >= 0) {
+              // Replace the optimistic message with the real one
+              const updated = [...prev]
+              updated[optIdx] = msg
+              pendingOptimisticIds.current.delete(prev[optIdx].id)
+              return updated
+            }
+            return [msg, ...prev]
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [workspaceId])
+
+  // Polling fallback: fetch new messages every 3s when Messages tab is active
+  // This ensures real-time delivery even if Supabase Realtime replication isn't enabled
+  useEffect(() => {
+    if (tab !== 'messages' || !workspaceId || !token) return
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const { messages: fresh } = await res.json()
+        if (!fresh || fresh.length === 0) return
+        setRealtimeMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id))
+          // Also track optimistic messages by content fingerprint
+          const optimisticFingerprints = new Set(
+            prev.filter((m) => m.id.startsWith('opt-')).map((m) => `${m.author_username}:${m.content}`)
+          )
+          let changed = false
+          const additions: typeof prev = []
+          for (const m of fresh) {
+            if (existingIds.has(m.id)) continue
+            // Skip if this matches an optimistic message
+            const fp = `${m.author_username}:${m.content}`
+            if (optimisticFingerprints.has(fp)) {
+              // Replace the optimistic one with the real one
+              const optIdx = prev.findIndex((p) => p.id.startsWith('opt-') && `${p.author_username}:${p.content}` === fp)
+              if (optIdx >= 0) {
+                prev = [...prev]
+                prev[optIdx] = m
+                changed = true
+                continue
+              }
+            }
+            additions.push(m)
+            changed = true
+          }
+          if (!changed && additions.length === 0) return prev
+          const merged = [...(changed ? prev : prev), ...additions]
+            .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+          return merged
+        })
+      } catch { /* silent */ }
+    }
+
+    // Initial poll immediately
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => clearInterval(interval)
+  }, [tab, workspaceId, token])
 
   // Repo binding state
   const [repoBinding, setRepoBinding] = useState<{ bound: boolean; repo: { owner: string; name: string; url: string; webhook_active: boolean; default_branch: string; private: boolean } | null; collaborators: Array<{ username: string; avatar_url: string; role_name: string; permissions: Record<string,boolean> }>; collaborators_updated_at: string | null } | null>(null)
@@ -328,13 +456,39 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
       const { default: jsPDF } = await import('jspdf')
       const { default: html2canvas } = await import('html2canvas')
       if (!dashboardRef.current) return
-      const canvas = await html2canvas(dashboardRef.current, { backgroundColor: '#0a0a0a', scale: 1.5 })
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] })
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width, canvas.height)
+
+      const canvas = await html2canvas(dashboardRef.current, {
+        backgroundColor: '#0a0a0a',
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        imageTimeout: 5000,
+        onclone: (doc) => {
+          // Hide interactive elements that don't render well in canvas
+          doc.querySelectorAll('canvas').forEach((c) => (c.style.display = 'none'))
+          doc.querySelectorAll('button').forEach((b) => {
+            if (b.textContent?.includes('Export') || b.textContent?.includes('Refresh')) {
+              b.style.display = 'none'
+            }
+          })
+        },
+      })
+
+      const imgData = canvas.toDataURL('image/png')
+      const pdfW = canvas.width
+      const pdfH = canvas.height
+      const pdf = new jsPDF({
+        orientation: pdfW > pdfH ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [pdfW, pdfH],
+      })
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH)
       pdf.save(`dashboard-${wsInfo?.name ?? workspaceId}-${new Date().toISOString().slice(0, 10)}.pdf`)
       toast.success('PDF exported')
-    } catch {
-        toast.error('Export failed')
+    } catch (err) {
+      console.error('PDF export error:', err)
+      toast.error('Export failed — check console for details')
     } finally {
       setExportLoading(false)
     }
@@ -348,7 +502,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     { id: 'alerts', label: `Alerts${data?.alerts?.length ? ` (${data.alerts.length})` : ''}`, icon: Bell },
     { id: 'bus-factor', label: 'Bus Factor', icon: BookOpen },
     { id: 'team', label: `Team${data?.teamStats?.length ? ` (${data.teamStats.length})` : ''}`, icon: Users },
-    { id: 'messages', label: `Messages${data?.messages?.length ? ` (${data.messages.length})` : ''}`, icon: MessageSquare },
+    { id: 'messages', label: `Messages${realtimeMessages.length ? ` (${realtimeMessages.length})` : ''}`, icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Shield },
   ]
 
@@ -1250,7 +1404,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
         {tab === 'messages' && data && (
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-4">
-              <h2 className="text-sm font-semibold text-foreground">Team Messages ({data.messages?.length ?? 0})</h2>
+              <h2 className="text-sm font-semibold text-foreground">Team Messages ({realtimeMessages.length}){realtimeMessages.length > 0 && <span className="ml-1.5 inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" title="Live" />}</h2>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <input
@@ -1268,22 +1422,58 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               <form onSubmit={async (e) => {
                 e.preventDefault()
                 if (!msgInput.trim() || sendingMsg || !token) return
+                const content = msgInput.trim()
                 setSendingMsg(true)
+                setMsgInput('')
+                // Optimistic: add message instantly
+                const optimisticId = `opt-${Date.now()}`
+                const optimisticMsg = {
+                  id: optimisticId,
+                  source: 'app',
+                  channel_name: 'general',
+                  author_username: user?.name ?? user?.email ?? 'You',
+                  content,
+                  sent_at: new Date().toISOString(),
+                  intent: null,
+                  entities: null,
+                }
+                pendingOptimisticIds.current.add(optimisticId)
+                setRealtimeMessages((prev) => [optimisticMsg, ...prev])
                 try {
                   const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: msgInput.trim() }),
+                    body: JSON.stringify({ content }),
                   })
                   if (res.ok) {
-                    setMsgInput('')
-                    refetch()
-                    toast.success('Message sent')
+                    const { message: saved } = await res.json()
+                    // Replace optimistic message with server response (has real id + NLP intent)
+                    // The Realtime event may have already replaced it — handle both cases
+                    setRealtimeMessages((prev) => {
+                      const hasOptimistic = prev.some((m) => m.id === optimisticId)
+                      const hasReal = prev.some((m) => m.id === saved.id)
+                      if (hasOptimistic && !hasReal) {
+                        // Normal case: replace optimistic with real
+                        return prev.map((m) => m.id === optimisticId ? { ...saved } : m)
+                      } else if (hasOptimistic && hasReal) {
+                        // Realtime already added it — just remove optimistic
+                        return prev.filter((m) => m.id !== optimisticId)
+                      }
+                      // Optimistic was already replaced by Realtime handler — nothing to do
+                      return prev
+                    })
+                    pendingOptimisticIds.current.delete(optimisticId)
                   } else {
                     const d = await res.json()
                     toast.error(d.error || 'Failed to send')
+                    setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+                    pendingOptimisticIds.current.delete(optimisticId)
                   }
-                } catch { toast.error('Failed to send message') }
+                } catch {
+                  toast.error('Failed to send message')
+                  setRealtimeMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+                  pendingOptimisticIds.current.delete(optimisticId)
+                }
                 finally { setSendingMsg(false) }
               }} className="flex items-end gap-2">
                 <textarea
@@ -1312,7 +1502,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               </form>
             </div>
 
-            {(!data.messages || data.messages.length === 0) ? (
+            {realtimeMessages.length === 0 ? (
               <div className="bg-card border border-border rounded-xl py-12 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No messages yet.</p>
@@ -1320,7 +1510,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               </div>
             ) : (
               <div className="bg-card border border-border rounded-xl overflow-hidden divide-y divide-border">
-                {data.messages
+                {realtimeMessages
                   .filter((m) => {
                     if (!msgSearch) return true
                     const q = msgSearch.toLowerCase()
