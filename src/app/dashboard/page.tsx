@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Plus, GitBranch, LogOut, Shield, Search, Lock, Globe, Loader2, Github, X, Trash2 } from 'lucide-react'
+import { Plus, GitBranch, LogOut, Shield, Search, Lock, Globe, Loader2, Github, X, Trash2, MessageSquare } from 'lucide-react'
 
 interface Workspace {
   id: string
@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ name: '', description: '', github_repo_owner: '', github_repo_name: '' })
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
 
   // GitHub repo picker state
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([])
@@ -161,13 +162,56 @@ export default function DashboardPage() {
           <span className="font-semibold text-foreground">Code Style Policeman</span>
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            {user?.avatar_url && <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />}
-            <span className="text-sm text-foreground">{user?.name}</span>
+          <div className="relative">
+            <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="flex items-center gap-2 p-1 rounded-lg hover:bg-muted transition-colors">
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
+              )}
+              <span className="text-sm text-foreground hidden sm:block">{user?.name}</span>
+            </button>
+            {showAccountMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
+                <div className="absolute right-0 top-full mt-2 w-72 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="p-4 border-b border-border">
+                    <div className="flex items-center gap-3">
+                      {user?.avatar_url ? (
+                        <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-full" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-1">
+                    {user?.github_username && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                        <Github className="w-3.5 h-3.5" />
+                        <span>@{user.github_username}</span>
+                      </div>
+                    )}
+                    {user?.discord_username && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>{user.discord_username}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-border p-2">
+                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">
+                      <LogOut className="w-3.5 h-3.5" />
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-          <button onClick={logout} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </header>
 

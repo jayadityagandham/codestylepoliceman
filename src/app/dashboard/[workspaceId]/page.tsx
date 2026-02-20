@@ -9,7 +9,7 @@ import {
   GitCommit, GitPullRequest, AlertTriangle, Users, Activity, Clock, TrendingUp,
   Shield, RefreshCw, Download, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
-  ChevronLeft, Search, Hash
+  ChevronLeft, Search, Hash, Github, LogOut
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -236,6 +236,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [inviteLoading, setInviteLoading] = useState(false)
   const [collabRefreshing, setCollabRefreshing] = useState(false)
   const [unbindLoading, setUnbindLoading] = useState(false)
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
 
   useEffect(() => {
@@ -493,9 +494,54 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           <button onClick={exportPDF} disabled={exportLoading} title="Export PDF" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
             {exportLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Download className="w-4 h-4" />}
           </button>
-          <button onClick={logout} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded text-xs">
-            Sign out
-          </button>
+          <div className="relative">
+            <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="flex items-center gap-2 p-1 rounded-lg hover:bg-muted transition-colors">
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="w-6 h-6 rounded-full" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
+              )}
+            </button>
+            {showAccountMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
+                <div className="absolute right-0 top-full mt-2 w-72 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="p-4 border-b border-border">
+                    <div className="flex items-center gap-3">
+                      {user?.avatar_url ? (
+                        <img src={user.avatar_url} alt="" className="w-10 h-10 rounded-full" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-lg font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-1">
+                    {user?.github_username && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                        <Github className="w-3.5 h-3.5" />
+                        <span>@{user.github_username}</span>
+                      </div>
+                    )}
+                    {user?.discord_username && (
+                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>{user.discord_username}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-border p-2">
+                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors">
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

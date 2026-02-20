@@ -49,6 +49,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         .order('created_at', { ascending: false })
         .limit(20)
 
+      // Fetch file authorship from DB (populated during repo bind sync)
+      const { data: fileAuthorship } = await db
+        .from('file_authorship')
+        .select('file_path, author_github_username, lines_added, lines_modified, commit_count')
+        .eq('workspace_id', workspaceId)
+
+      const fileMap: Record<string, Array<{ author_github_username: string; lines_added: number; lines_modified: number }>> = {}
+      for (const fa of fileAuthorship ?? []) {
+        if (!fileMap[fa.file_path]) fileMap[fa.file_path] = []
+        fileMap[fa.file_path].push(fa)
+      }
+      const criticalFiles = Object.entries(fileMap)
+        .map(([file, authors]) => {
+          const { busFactor, dominant_author, concentration } = calculateKnowledgeConcentration(authors)
+          return { file, busFactor, dominant_author, concentration, authorCount: authors.length }
+        })
+        .filter((f) => f.concentration > 80)
+        .sort((a, b) => b.concentration - a.concentration)
+        .slice(0, 10)
+
       // Health score — weighted multi-signal formula
       // Formula: H = w1*C + w2*P + w3*I + w4*A + w5*D - penalties
       // C = Commit Velocity Score (0-100): measures how active the team is
@@ -159,7 +179,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           labels: i.labels,
         })),
         alerts: alertsData ?? [],
-        criticalFiles: [],
+        criticalFiles,
         members: members ?? [],
         healthHistory: [],
         wipPerUser: (() => {
