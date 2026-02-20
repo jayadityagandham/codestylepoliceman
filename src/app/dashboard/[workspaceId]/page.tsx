@@ -18,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 
-type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'messages' | 'settings'
+type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'settings'
 
 const SEVERITY_CONFIG = {
   critical: { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-400/10 border-red-400/30' },
@@ -345,6 +345,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     { id: 'issues', label: 'Issues', icon: AlertCircle },
     { id: 'alerts', label: `Alerts${data?.alerts?.length ? ` (${data.alerts.length})` : ''}`, icon: Bell },
     { id: 'bus-factor', label: 'Bus Factor', icon: BookOpen },
+    { id: 'team', label: `Team${data?.teamStats?.length ? ` (${data.teamStats.length})` : ''}`, icon: Users },
     { id: 'messages', label: `Messages${data?.messages?.length ? ` (${data.messages.length})` : ''}`, icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Shield },
   ]
@@ -1245,6 +1246,163 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* TEAM TAB — Per-contributor analysis (AR-VCS-002..012) */}
+        {tab === 'team' && data && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Team Contributions</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Per-contributor analysis — commits, PRs, issues, lines changed, and activity status</p>
+            </div>
+
+            {(!data.teamStats || data.teamStats.length === 0) ? (
+              <div className="bg-card border border-border rounded-xl p-12 text-center">
+                <Users className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No contributor data yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Bind a GitHub repo and data will appear here</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary bar */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    <p className="text-2xl font-bold text-foreground">{data.teamStats.length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Contributors</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    <p className="text-2xl font-bold text-emerald-400">{data.teamStats.filter(t => t.status === 'active').length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Active (&lt;48h)</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    <p className="text-2xl font-bold text-yellow-400">{data.teamStats.filter(t => t.status === 'moderate').length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Moderate (48h–7d)</p>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    <p className="text-2xl font-bold text-red-400">{data.teamStats.filter(t => t.status === 'inactive').length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Inactive (&gt;7d)</p>
+                  </div>
+                </div>
+
+                {/* Commit distribution chart */}
+                {data.teamStats.length > 0 && (
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4">Commit Distribution</p>
+                    <ResponsiveContainer width="100%" height={Math.max(180, data.teamStats.length * 36)}>
+                      <BarChart data={data.teamStats.slice(0, 15)} layout="vertical" margin={{ left: 10, right: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border/30" />
+                        <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
+                        <YAxis type="category" dataKey="username" width={100} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
+                          formatter={(v: number, name: string) => [v, name === 'commits' ? 'Commits' : name === 'prsOpened' ? 'PRs' : name]}
+                        />
+                        <Bar dataKey="commits" fill="#6366f1" radius={[0, 4, 4, 0]} name="Commits" />
+                        <Bar dataKey="prsOpened" fill="#22c55e" radius={[0, 4, 4, 0]} name="PRs Opened" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Contributor cards */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {data.teamStats.map((member) => {
+                    const statusColors: Record<string, string> = {
+                      active: 'bg-emerald-400/20 text-emerald-400 border-emerald-400/30',
+                      moderate: 'bg-yellow-400/20 text-yellow-400 border-yellow-400/30',
+                      inactive: 'bg-red-400/20 text-red-400 border-red-400/30',
+                    }
+                    const totalLines = member.linesAdded + member.linesDeleted
+                    return (
+                      <div key={member.username} className="bg-card border border-border rounded-xl p-5 space-y-4">
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {member.avatar_url ? (
+                              <img src={member.avatar_url} alt="" className="w-9 h-9 rounded-full" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-sm font-bold text-primary">
+                                {member.username[0]?.toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">{member.username}</p>
+                              {member.lastActive && (
+                                <p className="text-[10px] text-muted-foreground">
+                                  Last active {formatDistanceToNow(new Date(member.lastActive), { addSuffix: true })}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${statusColors[member.status] ?? statusColors.inactive}`}>
+                            {member.status}
+                          </span>
+                        </div>
+
+                        {/* Stats grid */}
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="text-center p-2 bg-muted/30 rounded-lg">
+                            <p className="text-lg font-bold text-foreground">{member.commits}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Commits</p>
+                          </div>
+                          <div className="text-center p-2 bg-muted/30 rounded-lg">
+                            <p className="text-lg font-bold text-foreground">{member.prsOpened}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">PRs Opened</p>
+                          </div>
+                          <div className="text-center p-2 bg-muted/30 rounded-lg">
+                            <p className="text-lg font-bold text-foreground">{member.prsMerged}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">PRs Merged</p>
+                          </div>
+                        </div>
+
+                        {/* Lines changed bar */}
+                        <div>
+                          <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                            <span>Lines changed</span>
+                            <span>
+                              <span className="text-emerald-400">+{member.linesAdded.toLocaleString()}</span>
+                              {' / '}
+                              <span className="text-red-400">-{member.linesDeleted.toLocaleString()}</span>
+                            </span>
+                          </div>
+                          {totalLines > 0 ? (
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden flex">
+                              <div className="h-full bg-emerald-500" style={{ width: `${(member.linesAdded / totalLines) * 100}%` }} />
+                              <div className="h-full bg-red-500" style={{ width: `${(member.linesDeleted / totalLines) * 100}%` }} />
+                            </div>
+                          ) : (
+                            <div className="h-1.5 bg-muted rounded-full" />
+                          )}
+                        </div>
+
+                        {/* Extra details row */}
+                        <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            {member.issuesAssigned} issues assigned
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <GitBranch className="w-3 h-3" />
+                            {member.activeBranches} active {member.activeBranches === 1 ? 'branch' : 'branches'}
+                          </span>
+                          {member.avgPRDuration !== null && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {member.avgPRDuration < 1
+                                ? `${Math.round(member.avgPRDuration * 60)}m avg PR`
+                                : member.avgPRDuration < 24
+                                ? `${member.avgPRDuration.toFixed(1)}h avg PR`
+                                : `${(member.avgPRDuration / 24).toFixed(1)}d avg PR`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
             )}
           </div>
         )}
