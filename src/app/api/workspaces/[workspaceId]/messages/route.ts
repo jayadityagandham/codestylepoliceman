@@ -129,3 +129,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
 
   return NextResponse.json({ message: mapMessage(row as RawMsg) })
 }
+
+// DELETE /api/workspaces/:id/messages — delete a message (admin only)
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ workspaceId: string }> }) {
+  const { workspaceId } = await params
+  const { user, error } = await requireAuth(req)
+  if (error) return error
+
+  const db = createServiceClient()
+  const { data: member } = await db
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user!.id)
+    .single()
+  if (!member || member.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+
+  const { message_id } = await req.json()
+  if (!message_id) return NextResponse.json({ error: 'message_id required' }, { status: 400 })
+
+  const { error: delErr } = await db
+    .from('discord_messages')
+    .delete()
+    .eq('id', message_id)
+    .eq('workspace_id', workspaceId)
+
+  if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 })
+
+  return NextResponse.json({ success: true })
+}

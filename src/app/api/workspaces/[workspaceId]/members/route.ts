@@ -47,3 +47,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ wo
 
   return NextResponse.json({ success: true })
 }
+
+// DELETE /api/workspaces/[workspaceId]/members - remove member (admin only)
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ workspaceId: string }> }) {
+  const { workspaceId } = await params
+  const { user, error } = await requireAuth(req)
+  if (error) return error
+
+  const db = createServiceClient()
+  const { data: member } = await db
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user!.id)
+    .single()
+
+  if (!member || member.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+
+  const { target_user_id } = await req.json()
+  if (!target_user_id) return NextResponse.json({ error: 'target_user_id required' }, { status: 400 })
+  if (target_user_id === user!.id) return NextResponse.json({ error: 'Cannot remove yourself' }, { status: 400 })
+
+  const { error: delErr } = await db
+    .from('workspace_members')
+    .delete()
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', target_user_id)
+
+  if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 })
+
+  return NextResponse.json({ success: true })
+}
