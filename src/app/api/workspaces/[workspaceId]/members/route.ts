@@ -48,7 +48,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ wo
   return NextResponse.json({ success: true })
 }
 
-// DELETE /api/workspaces/[workspaceId]/members - remove member (admin only)
+// DELETE /api/workspaces/[workspaceId]/members - remove member (admin removes others, or user leaves)
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = await params
   const { user, error } = await requireAuth(req)
@@ -62,11 +62,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ w
     .eq('user_id', user!.id)
     .single()
 
-  if (!member || member.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+  if (!member) return NextResponse.json({ error: 'Not a member' }, { status: 403 })
 
   const { target_user_id } = await req.json()
   if (!target_user_id) return NextResponse.json({ error: 'target_user_id required' }, { status: 400 })
-  if (target_user_id === user!.id) return NextResponse.json({ error: 'Cannot remove yourself' }, { status: 400 })
+
+  // Allow: admin removing anyone else, OR user removing themselves (leave)
+  const isSelf = target_user_id === user!.id
+  if (!isSelf && member.role !== 'admin') return NextResponse.json({ error: 'Admin only' }, { status: 403 })
 
   const { error: delErr } = await db
     .from('workspace_members')
