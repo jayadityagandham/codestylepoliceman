@@ -195,12 +195,6 @@ export default function DashboardPage() {
                         <span>@{user.github_username}</span>
                       </div>
                     )}
-                    {user?.discord_username && (
-                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>{user.discord_username}</span>
-                      </div>
-                    )}
                   </div>
                   <div className="border-t border-border p-2">
                     <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">

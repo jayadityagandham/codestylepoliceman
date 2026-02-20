@@ -35,7 +35,7 @@ export default function LoginPage() {
             {[
               { icon: GitBranch, text: 'Real-time GitHub commit & PR tracking' },
               { icon: Activity, text: 'Cycle time & flow metrics at a glance' },
-              { icon: MessageSquare, text: 'Discord blocker detection via NLP' },
+              { icon: MessageSquare, text: 'In-app team messaging with NLP analysis' },
               { icon: Users, text: 'Bus factor & knowledge distribution' },
             ].map(({ icon: Icon, text }) => (
               <div key={text} className="flex items-center gap-3 text-muted-foreground">
@@ -73,15 +73,6 @@ export default function LoginPage() {
             >
               <Github className="w-5 h-5" />
               Continue with GitHub
-              <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
-            </a>
-
-            <a
-              href="/api/auth/discord"
-              className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-indigo-900/50 hover:bg-indigo-900/70 border border-indigo-700/50 rounded-lg text-sm font-medium text-foreground transition-colors group"
-            >
-              <MessageSquare className="w-4 h-4 text-indigo-400" />
-              Continue with Discord
               <ArrowRight className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
             </a>
           </div>
