@@ -7,9 +7,10 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   GitCommit, GitPullRequest, AlertTriangle, Users, Activity, Clock, TrendingUp,
-  Shield, RefreshCw, Download, Bell, GitBranch, ChevronRight, Copy, X,
+  Shield, RefreshCw, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
-  ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus
+  ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus,
+  Pencil, Mail, Calendar, Save, KeyRound
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -211,13 +212,12 @@ function ForceGraph({ nodes, links }: {
 
 export default function WorkspaceDashboard({ params }: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = use(params)
-  const { user, token, logout } = useAuth()
+  const { user, token, logout, setTokenAndUser } = useAuth()
   const router = useRouter()
   const { data, loading, error, refetch } = useDashboard(workspaceId)
   const [tab, setTab] = useState<Tab>('overview')
   const [wsInfo, setWsInfo] = useState<{ name: string; github_webhook_secret?: string; discord_channel_id?: string; github_repo_owner?: string; github_repo_name?: string } | null>(null)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
-  const [exportLoading, setExportLoading] = useState(false)
   const dashboardRef = useRef<HTMLDivElement>(null)
   const [commitsPage, setCommitsPage] = useState(0)
   const [prsPage, setPrsPage] = useState(0)
@@ -377,6 +377,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
   const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null)
+  const [editingProfile, setEditingProfile] = useState(false)
+  const [profileName, setProfileName] = useState('')
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [editingWsName, setEditingWsName] = useState(false)
+  const [wsNameInput, setWsNameInput] = useState('')
+  const [wsNameSaving, setWsNameSaving] = useState(false)
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false)
+  const [notifPrefs, setNotifPrefs] = useState({ alerts: true, messages: true, heuristics: true })
 
   // Derive admin status from members data
   const isAdmin = data?.members?.some((m) => m.user?.id === user?.id && m.role === 'admin') ?? false
@@ -460,50 +468,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
       else toast.error(d.error)
     } catch { toast.error('Heuristic scan failed') }
     finally { setHeuristicsLoading(false) }
-  }
-
-  const exportPDF = async () => {
-    setExportLoading(true)
-    try {
-      const { default: jsPDF } = await import('jspdf')
-      const { default: html2canvas } = await import('html2canvas')
-      if (!dashboardRef.current) return
-
-      const canvas = await html2canvas(dashboardRef.current, {
-        backgroundColor: '#0a0a0a',
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        imageTimeout: 5000,
-        onclone: (doc) => {
-          // Hide interactive elements that don't render well in canvas
-          doc.querySelectorAll('canvas').forEach((c) => (c.style.display = 'none'))
-          doc.querySelectorAll('button').forEach((b) => {
-            if (b.textContent?.includes('Export') || b.textContent?.includes('Refresh')) {
-              b.style.display = 'none'
-            }
-          })
-        },
-      })
-
-      const imgData = canvas.toDataURL('image/png')
-      const pdfW = canvas.width
-      const pdfH = canvas.height
-      const pdf = new jsPDF({
-        orientation: pdfW > pdfH ? 'landscape' : 'portrait',
-        unit: 'px',
-        format: [pdfW, pdfH],
-      })
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH)
-      pdf.save(`dashboard-${wsInfo?.name ?? workspaceId}-${new Date().toISOString().slice(0, 10)}.pdf`)
-      toast.success('PDF exported')
-    } catch (err) {
-      console.error('PDF export error:', err)
-      toast.error('Export failed — check console for details')
-    } finally {
-      setExportLoading(false)
-    }
   }
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -659,9 +623,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           </button>
           <button onClick={refetch} disabled={loading} title="Refresh" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <button onClick={exportPDF} disabled={exportLoading} title="Export PDF" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
-            {exportLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Download className="w-4 h-4" />}
           </button>
           <div className="relative">
             <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="flex items-center gap-2 p-1 rounded-lg hover:bg-muted transition-colors">
@@ -1976,7 +1937,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                           <button
                             onClick={async () => {
                               if (removingMemberId) return
-                              if (!confirm(`Remove ${m.user?.name ?? 'this member'} from the workspace?`)) return
                               setRemovingMemberId(m.user?.id ?? null)
                               try {
                                 const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
@@ -2007,6 +1967,263 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                 </div>
               </div>
             )}
+
+            {/* Profile Card */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Users className="w-4 h-4" /> Your Profile
+              </h3>
+              <div className="flex items-start gap-4">
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="w-14 h-14 rounded-full border-2 border-border" />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center border-2 border-border">
+                    <span className="text-xl font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</span>
+                  </div>
+                )}
+                <div className="flex-1 space-y-2">
+                  {editingProfile ? (
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Display Name</label>
+                        <input
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          className="w-full mt-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          placeholder="Your name"
+                          maxLength={100}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            if (!profileName.trim() || profileSaving) return
+                            setProfileSaving(true)
+                            try {
+                              const res = await fetch('/api/auth/me', {
+                                method: 'PATCH',
+                                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ name: profileName.trim() }),
+                              })
+                              if (res.ok) {
+                                const { user: updated } = await res.json()
+                                setTokenAndUser(token!, updated)
+                                toast.success('Profile updated')
+                                setEditingProfile(false)
+                                refetch()
+                              } else {
+                                const d = await res.json()
+                                toast.error(d.error || 'Failed to update profile')
+                              }
+                            } catch { toast.error('Failed to update profile') }
+                            finally { setProfileSaving(false) }
+                          }}
+                          disabled={profileSaving || !profileName.trim()}
+                          className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {profileSaving ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save className="w-3 h-3" />}
+                          Save
+                        </button>
+                        <button onClick={() => setEditingProfile(false)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-foreground">{user?.name}</p>
+                        <button
+                          onClick={() => { setProfileName(user?.name ?? ''); setEditingProfile(true) }}
+                          className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
+                          title="Edit name"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <Mail className="w-3 h-3 text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground">{user?.email}</p>
+                      </div>
+                      {user?.github_username && (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <Github className="w-3 h-3 text-muted-foreground" />
+                          <p className="text-xs text-muted-foreground">@{user.github_username}</p>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <KeyRound className="w-3 h-3 text-muted-foreground" />
+                        <p className="text-[10px] text-muted-foreground">ID: {user?.id?.slice(0, 8)}...</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Workspace Rename (admin only) */}
+            {isAdmin && (
+              <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Pencil className="w-4 h-4" /> Workspace Name
+                </h3>
+                {editingWsName ? (
+                  <div className="space-y-2">
+                    <input
+                      value={wsNameInput}
+                      onChange={(e) => setWsNameInput(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      placeholder="Workspace name"
+                      maxLength={60}
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          if (!wsNameInput.trim() || wsNameSaving) return
+                          setWsNameSaving(true)
+                          try {
+                            const res = await fetch(`/api/workspaces/${workspaceId}`, {
+                              method: 'PATCH',
+                              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: wsNameInput.trim() }),
+                            })
+                            if (res.ok) {
+                              toast.success('Workspace renamed')
+                              setWsInfo((prev) => prev ? { ...prev, name: wsNameInput.trim() } : prev)
+                              setEditingWsName(false)
+                            } else {
+                              const d = await res.json()
+                              toast.error(d.error || 'Failed to rename')
+                            }
+                          } catch { toast.error('Failed to rename workspace') }
+                          finally { setWsNameSaving(false) }
+                        }}
+                        disabled={wsNameSaving || !wsNameInput.trim()}
+                        className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {wsNameSaving ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save className="w-3 h-3" />}
+                        Save
+                      </button>
+                      <button onClick={() => setEditingWsName(false)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-foreground font-medium">{wsInfo.name}</p>
+                    <button
+                      onClick={() => { setWsNameInput(wsInfo.name); setEditingWsName(true) }}
+                      className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted flex items-center gap-1.5"
+                    >
+                      <Pencil className="w-3 h-3" /> Rename
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Notification Preferences */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Bell className="w-4 h-4" /> Notification Preferences
+              </h3>
+              <p className="text-xs text-muted-foreground">Choose which notifications you want to receive in this workspace</p>
+              <div className="space-y-3">
+                {[
+                  { key: 'alerts' as const, label: 'Alert Notifications', desc: 'Get notified when new alerts are generated (stale PRs, blockers, etc.)' },
+                  { key: 'messages' as const, label: 'Message Notifications', desc: 'Get notified when new team messages arrive' },
+                  { key: 'heuristics' as const, label: 'Heuristic Scan Results', desc: 'Get notified when automated heuristic scans detect issues' },
+                ].map((pref) => (
+                  <div key={pref.key} className="flex items-center justify-between py-2">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">{pref.label}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{pref.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setNotifPrefs((prev) => ({ ...prev, [pref.key]: !prev[pref.key] }))
+                        toast.success(`${pref.label} ${notifPrefs[pref.key] ? 'disabled' : 'enabled'}`)
+                      }}
+                      className={`relative w-9 h-5 rounded-full transition-colors ${
+                        notifPrefs[pref.key] ? 'bg-primary' : 'bg-muted-foreground/30'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                        notifPrefs[pref.key] ? 'translate-x-4' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Danger Zone */}
+            <div className="bg-card border border-red-500/20 rounded-xl p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-red-400 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" /> Danger Zone
+              </h3>
+              {isAdmin && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Delete Workspace</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Permanently delete this workspace and all its data. This cannot be undone.</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (deletingWorkspace) return
+                      setDeletingWorkspace(true)
+                      try {
+                        const res = await fetch(`/api/workspaces/${workspaceId}`, {
+                          method: 'DELETE',
+                          headers: { Authorization: `Bearer ${token}` },
+                        })
+                        if (res.ok) {
+                          toast.success('Workspace deleted')
+                          router.push('/dashboard')
+                        } else {
+                          const d = await res.json()
+                          toast.error(d.error || 'Failed to delete')
+                        }
+                      } catch { toast.error('Failed to delete workspace') }
+                      finally { setDeletingWorkspace(false) }
+                    }}
+                    disabled={deletingWorkspace}
+                    className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                  >
+                    {deletingWorkspace ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Delete Workspace
+                  </button>
+                </div>
+              )}
+              <div className={`flex items-center justify-between ${isAdmin ? 'pt-2 border-t border-red-500/10' : ''}`}>
+                <div>
+                  <p className="text-xs font-medium text-foreground">Leave Workspace</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Remove yourself from this workspace. You can be re-invited later.</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_user_id: user?.id }),
+                      })
+                      if (res.ok) {
+                        toast.success('Left workspace')
+                        router.push('/dashboard')
+                      } else {
+                        const d = await res.json()
+                        toast.error(d.error || 'Failed to leave')
+                      }
+                    } catch { toast.error('Failed to leave workspace') }
+                  }}
+                  className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors flex items-center gap-1.5 shrink-0"
+                >
+                  <LogOut className="w-3 h-3" /> Leave
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>
