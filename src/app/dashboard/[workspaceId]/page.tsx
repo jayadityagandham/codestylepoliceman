@@ -227,7 +227,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [sendingMsg, setSendingMsg] = useState(false)
   const [realtimeMessages, setRealtimeMessages] = useState<Array<{ id: string; source: string; channel_name: string; author_username: string; content: string; sent_at: string; intent: string | null; entities: Record<string, unknown> | null }>>([])
   const pendingOptimisticIds = useRef<Set<string>>(new Set())
+  const [, setTick] = useState(0)
   const PAGE_SIZE = 10
+
+  // Tick every 30s to refresh relative timestamps ("X minutes ago")
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 30000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Sync messages: merge dashboard data into realtime state whenever it changes
   useEffect(() => {
