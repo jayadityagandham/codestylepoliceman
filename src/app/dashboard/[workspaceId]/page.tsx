@@ -1102,15 +1102,88 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           <div className="space-y-4">
             <div>
               <h2 className="text-sm font-semibold text-foreground">Knowledge Distribution</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Files with high concentration (single-author risk)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {data.criticalFiles.some(f => f.file.startsWith('@'))
+                  ? 'Contributor commit concentration — how dependent is the project on individual contributors?'
+                  : 'Files with high concentration (single-author risk)'}
+              </p>
             </div>
+
+            {/* Codebase bus factor summary */}
+            {(data.codebaseBusFactor !== undefined || data.contributors.length > 0) && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                  <p className={`text-3xl font-bold ${(data.codebaseBusFactor ?? 0) <= 1 ? 'text-red-400' : (data.codebaseBusFactor ?? 0) <= 2 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                    {data.codebaseBusFactor ?? '—'}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Codebase Bus Factor</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Contributors needed to cover 50% of commits</p>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                  <p className="text-3xl font-bold text-foreground">{data.contributors.length}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Total Contributors</p>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                  <p className="text-3xl font-bold text-foreground">{data.criticalFiles.length}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">
+                    {data.criticalFiles.some(f => f.file.startsWith('@')) ? 'High-Concentration Contributors' : 'At-Risk Files'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {data.criticalFiles.length === 0 ? (
               <div className="bg-card border border-border rounded-xl py-16 text-center">
                 <BookOpen className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No file authorship data yet.</p>
-                <p className="text-xs text-muted-foreground mt-1">Push commits with modified files to see bus factor analysis.</p>
+                <p className="text-sm text-muted-foreground">No concentration risks detected</p>
+                <p className="text-xs text-muted-foreground mt-1">Knowledge appears well-distributed, or bind a GitHub repo to see analysis.</p>
+              </div>
+            ) : data.criticalFiles.some(f => f.file.startsWith('@')) ? (
+              /* Contributor-level bus factor (live fallback) */
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-border grid grid-cols-12 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                  <span className="col-span-5">Contributor</span>
+                  <span className="col-span-4">Commit Share</span>
+                  <span className="col-span-3 text-right">Concentration</span>
+                </div>
+                <div className="divide-y divide-border">
+                  {data.criticalFiles.map((f) => (
+                    <div key={f.file} className="px-5 py-3 grid grid-cols-12 items-center gap-2 hover:bg-muted/30 transition-colors">
+                      <div className="col-span-5 flex items-center gap-2.5 min-w-0">
+                        {(() => {
+                          const contributor = data.contributors.find(c => c.username === f.dominant_author)
+                          return contributor?.avatar_url ? (
+                            <img src={contributor.avatar_url} alt="" className="w-7 h-7 rounded-full flex-shrink-0" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary flex-shrink-0">
+                              {f.dominant_author?.[0]?.toUpperCase()}
+                            </div>
+                          )
+                        })()}
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{f.dominant_author}</p>
+                          <p className="text-[10px] text-muted-foreground">{f.authorCount} total contributors</p>
+                        </div>
+                      </div>
+                      <div className="col-span-4">
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${f.concentration > 60 ? 'bg-red-400' : f.concentration > 40 ? 'bg-yellow-400' : 'bg-emerald-400'}`}
+                            style={{ width: `${f.concentration}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="col-span-3 text-right">
+                        <span className={`text-xs font-semibold ${f.concentration > 60 ? 'text-red-400' : f.concentration > 40 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                          {f.concentration}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
+              /* Per-file bus factor (from file_authorship) */
               <div className="bg-card border border-border rounded-xl overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-border grid grid-cols-4 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                   <span className="col-span-2">File</span>
