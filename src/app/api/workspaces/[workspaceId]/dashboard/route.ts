@@ -49,6 +49,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         .order('created_at', { ascending: false })
         .limit(20)
 
+      // Fetch messages from DB (stored in discord_messages table)
+      const { data: liveMessages } = await db
+        .from('discord_messages')
+        .select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities')
+        .eq('workspace_id', workspaceId)
+        .order('sent_at', { ascending: false })
+        .limit(50)
+
       // Fetch file authorship from DB (populated during repo bind sync)
       const { data: fileAuthorship } = await db
         .from('file_authorship')
@@ -306,7 +314,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
           return Object.entries(wipMap).map(([username, count]) => ({ username, count })).sort((a, b) => b.count - a.count)
         })(),
         cycleTimeTrend: [],
-        messages: [],
+        messages: (liveMessages ?? []).map((m: Record<string, unknown>) => ({
+          id: m.id,
+          source: m.author_discord_id === 'app' ? 'app' : 'discord',
+          channel_name: m.channel_name,
+          author_username: m.author_username,
+          content: m.content,
+          sent_at: m.sent_at,
+          intent: m.intent,
+          entities: m.entities,
+        })),
         teamStats,
         liveSource: true,
       })
