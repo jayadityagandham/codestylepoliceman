@@ -94,8 +94,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
               concentration: Math.round(concentration * 10) / 10,
               authorCount: live.contributors.length,
             }
-          }).filter((f) => f.concentration > 20)
-            .slice(0, 10)
+          }).slice(0, 15)
         }
       }
 
