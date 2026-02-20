@@ -343,7 +343,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     db.from('file_authorship').select('file_path, author_github_username, lines_added, lines_modified, commit_count').eq('workspace_id', workspaceId),
     db.from('cycle_time_metrics').select('pull_request_id, coding_time_seconds, pickup_time_seconds, review_time_seconds, deployment_time_seconds, total_cycle_time_seconds, calculated_at').eq('workspace_id', workspaceId).order('calculated_at', { ascending: false }).limit(20),
     db.from('health_snapshots').select('score, snapshot_at').eq('workspace_id', workspaceId).order('snapshot_at', { ascending: false }).limit(30),
-    db.from('communication_messages').select('id, source, channel_name, author_username, content, sent_at, intent, entities').eq('workspace_id', workspaceId).order('sent_at', { ascending: false }).limit(50),
+    db.from('discord_messages').select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities').eq('workspace_id', workspaceId).order('sent_at', { ascending: false }).limit(50),
   ])
 
   // Contributor activity
@@ -514,7 +514,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     healthHistory: healthHistory ?? [],
     wipPerUser,
     cycleTimeTrend,
-    messages: messages ?? [],
+    messages: (messages ?? []).map((m: Record<string, unknown>) => ({
+      id: m.id,
+      source: m.author_discord_id === 'app' ? 'app' : 'discord',
+      channel_name: m.channel_name,
+      author_username: m.author_username,
+      content: m.content,
+      sent_at: m.sent_at,
+      intent: m.intent,
+      entities: m.entities,
+    })),
     teamStats: dbTeamStats,
   })
 }
