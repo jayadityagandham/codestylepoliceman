@@ -637,7 +637,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-[120px] flex items-center justify-center text-xs text-muted-foreground">No data yet. Bind a GitHub repo to see health breakdown.</div>
+                  <div className="h-30 flex items-center justify-center text-xs text-muted-foreground">No data yet. Bind a GitHub repo to see health breakdown.</div>
                 )}
               </div>
             </div>
@@ -782,7 +782,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                 <p className="text-xs text-muted-foreground text-center py-6">No pull requests tracked yet.</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="min-w-[500px] space-y-2">
+                  <div className="min-w-125 space-y-2">
                     {data.pullRequests.slice(0, 8).map((pr) => {
                       const opened = new Date(pr.opened_at).getTime()
                       const merged = pr.merged_at ? new Date(pr.merged_at).getTime() : Date.now()
