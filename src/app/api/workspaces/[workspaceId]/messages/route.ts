@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-middleware'
 import { createServiceClient } from '@/lib/supabase'
 import { detectIntent, extractEntities } from '@/lib/nlp'
+import { classifyMessageIntent } from '@/lib/gemini'
 
 // We use the existing discord_messages table for all messages.
 // In-app messages use author_discord_id = 'app' to distinguish from Discord messages.
@@ -86,9 +87,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
 
   const trimmed = content.trim().slice(0, 2000)
 
-  // NLP analysis
-  const intent = detectIntent(trimmed)
-  const entities = extractEntities(trimmed)
+  // AI-powered intent classification (Gemini) with regex fallback
+  let intent: string
+  let entities = extractEntities(trimmed)
+  let aiSummary: string | null = null
+
+  const aiResult = await classifyMessageIntent(trimmed)
+  if (aiResult) {
+    intent = aiResult.intent
+    aiSummary = aiResult.summary
+  } else {
+    // Fallback to regex-based NLP
+    intent = detectIntent(trimmed)
+  }
 
   const { data: row, error: insertErr } = await db
     .from('discord_messages')
@@ -101,7 +112,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
       author_username: user!.name ?? user!.email ?? 'Unknown',
       content: trimmed,
       intent,
-      entities,
+      entities: { ...entities, aiSummary },
       is_blocker: entities.isBlocker ?? false,
       sent_at: new Date().toISOString(),
     })

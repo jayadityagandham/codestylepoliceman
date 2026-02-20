@@ -10,7 +10,7 @@ import {
   Shield, RefreshCw, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
   ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus,
-  Pencil, Mail, Calendar, Save, KeyRound
+  Pencil, Mail, Calendar, Save, KeyRound, Brain, ListTodo, Target, Plus, CircleDot, Flame, Sparkles, Loader2
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -19,7 +19,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 
-type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'settings'
+type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'insights' | 'settings'
 
 const SEVERITY_CONFIG = {
   critical: { icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-400/10 border-red-400/30' },
@@ -385,9 +385,31 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [wsNameSaving, setWsNameSaving] = useState(false)
   const [deletingWorkspace, setDeletingWorkspace] = useState(false)
   const [notifPrefs, setNotifPrefs] = useState({ alerts: true, messages: true, heuristics: true })
+  const [todos, setTodos] = useState<Array<{ id: string; title: string; description: string | null; status: string; priority: string; deadline: string | null; assigned_to: string | null; created_by: string; completed_at: string | null; created_at: string }>>([])
+  const [todosLoading, setTodosLoading] = useState(false)
+  const [newTodoTitle, setNewTodoTitle] = useState('')
+  const [newTodoDesc, setNewTodoDesc] = useState('')
+  const [newTodoPriority, setNewTodoPriority] = useState<'low' | 'medium' | 'high' | 'critical'>('medium')
+  const [newTodoDeadline, setNewTodoDeadline] = useState('')
+  const [addingTodo, setAddingTodo] = useState(false)
+  const [showAddTodo, setShowAddTodo] = useState(false)
+  const [aiAnalysis, setAiAnalysis] = useState<{ summary: string; risks: string[]; suggestions: string[]; teamDynamics: string; nextSteps: string[] } | null>(null)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const [aiRetryCountdown, setAiRetryCountdown] = useState(0)
 
   // Derive admin status from members data
   const isAdmin = data?.members?.some((m) => m.user?.id === user?.id && m.role === 'admin') ?? false
+
+  // Fetch todos when insights tab is active
+  useEffect(() => {
+    if (tab !== 'insights' || !token) return
+    setTodosLoading(true)
+    fetch(`/api/workspaces/${workspaceId}/todos`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => setTodos(d.todos ?? []))
+      .catch(() => toast.error('Failed to load tasks'))
+      .finally(() => setTodosLoading(false))
+  }, [tab, token, workspaceId])
 
   useEffect(() => {
     if (!user) router.push('/')
@@ -479,6 +501,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     { id: 'bus-factor', label: 'Bus Factor', icon: BookOpen },
     { id: 'team', label: `Team${data?.teamStats?.length ? ` (${data.teamStats.length})` : ''}`, icon: Users },
     { id: 'messages', label: `Messages${realtimeMessages.length ? ` (${realtimeMessages.length})` : ''}`, icon: MessageSquare },
+    { id: 'insights', label: 'AI Insights', icon: Brain },
     { id: 'settings', label: 'Settings', icon: Shield },
   ]
 
@@ -1705,6 +1728,605 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   })}
                 </div>
               </>
+            )}
+          </div>
+        )}
+
+        {/* AI INSIGHTS TAB */}
+        {tab === 'insights' && (
+          <div className="max-w-4xl space-y-6">
+            {/* Project Progress */}
+            {(() => {
+              const total = todos.length
+              const completed = todos.filter((t) => t.status === 'completed').length
+              const inProgress = todos.filter((t) => t.status === 'in-progress').length
+              const pending = todos.filter((t) => t.status === 'pending').length
+              const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+              const overdue = todos.filter((t) => t.deadline && new Date(t.deadline) < new Date() && t.status !== 'completed').length
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-card border border-border rounded-xl p-5 flex flex-col items-center">
+                    <div className="relative w-20 h-20 mb-2">
+                      <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                        <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/30" />
+                        <circle cx="50" cy="50" r="40" fill="none" stroke={pct >= 75 ? '#22c55e' : pct >= 40 ? '#eab308' : '#8b5cf6'} strokeWidth="8" strokeDasharray={`${(pct / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-700" />
+                      </svg>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-lg font-bold text-foreground">{pct}%</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-medium text-muted-foreground">Project Progress</span>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total Tasks</span>
+                      <ListTodo className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="text-2xl font-bold text-foreground">{total}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{completed} completed</div>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">In Progress</span>
+                      <CircleDot className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div className="text-2xl font-bold text-foreground">{inProgress}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{pending} pending</div>
+                  </div>
+                  <div className="bg-card border border-border rounded-xl p-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Overdue</span>
+                      <Flame className="w-4 h-4 text-red-400" />
+                    </div>
+                    <div className={`text-2xl font-bold ${overdue > 0 ? 'text-red-400' : 'text-foreground'}`}>{overdue}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{overdue > 0 ? 'needs attention' : 'on track'}</div>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* AI-Powered Analysis (Gemini) */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400" /> AI Analysis
+                    <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full font-medium">Gemini</span>
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1">Deep analysis of your project powered by Google Gemini AI</p>
+                </div>
+                <button
+                  disabled={aiAnalyzing || aiRetryCountdown > 0}
+                  onClick={async () => {
+                    if (!data || !token) return
+                    setAiAnalyzing(true)
+                    try {
+                      const res = await fetch(`/api/workspaces/${workspaceId}/ai-analyze`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          messages: realtimeMessages.slice(0, 50).map((m) => ({ content: m.content, author: m.author_username, intent: m.intent, sent_at: m.sent_at })),
+                          todos: todos.map((t) => ({ title: t.title, status: t.status, priority: t.priority, deadline: t.deadline })),
+                          healthScore: data.overview.healthScore,
+                          openPRs: data.pullRequests?.filter((p) => p.state === 'open').length || 0,
+                          openIssues: data.issues?.filter((i) => i.state === 'open').length || 0,
+                          totalCommits: data.overview.totalCommits,
+                          teamSize: data.teamStats?.length || data.members?.length || 1,
+                          busFactor: data.codebaseBusFactor,
+                          recentCommitTypes: data.recentCommits?.slice(0, 30).map((c) => c.commit_type) || [],
+                        }),
+                      })
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}))
+                        if (res.status === 429 && err.retryAfterMs) {
+                          const secs = Math.ceil(err.retryAfterMs / 1000)
+                          setAiRetryCountdown(secs)
+                          const interval = setInterval(() => {
+                            setAiRetryCountdown((prev) => {
+                              if (prev <= 1) { clearInterval(interval); return 0 }
+                              return prev - 1
+                            })
+                          }, 1000)
+                        }
+                        throw new Error(err.error || 'Analysis failed')
+                      }
+                      const result = await res.json()
+                      setAiAnalysis(result.analysis)
+                    } catch (e: unknown) {
+                      const msg = e instanceof Error ? e.message : 'Failed to run AI analysis'
+                      toast.error(msg)
+                    } finally {
+                      setAiAnalyzing(false)
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {aiAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  {aiAnalyzing ? 'Analyzing...' : aiRetryCountdown > 0 ? `Retry in ${aiRetryCountdown}s` : 'Generate Analysis'}
+                </button>
+              </div>
+
+              {aiAnalysis ? (
+                <div className="space-y-4">
+                  {/* Summary */}
+                  <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                    <p className="text-[10px] font-semibold text-purple-400 uppercase tracking-wide mb-1">Summary</p>
+                    <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.summary}</p>
+                  </div>
+
+                  {/* Risks */}
+                  {aiAnalysis.risks.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Risks Identified</p>
+                      <div className="space-y-1.5">
+                        {aiAnalysis.risks.map((risk, i) => (
+                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-red-500/5 border border-red-500/15">
+                            <span className="text-red-400 text-xs mt-0.5">•</span>
+                            <p className="text-xs text-foreground">{risk}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suggestions */}
+                  {aiAnalysis.suggestions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Suggestions</p>
+                      <div className="space-y-1.5">
+                        {aiAnalysis.suggestions.map((s, i) => (
+                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-emerald-500/5 border border-emerald-500/15">
+                            <span className="text-emerald-400 text-xs mt-0.5">•</span>
+                            <p className="text-xs text-foreground">{s}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Team Dynamics */}
+                  {aiAnalysis.teamDynamics && (
+                    <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                      <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide mb-1 flex items-center gap-1"><Users className="w-3 h-3" /> Team Dynamics</p>
+                      <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.teamDynamics}</p>
+                    </div>
+                  )}
+
+                  {/* Next Steps */}
+                  {aiAnalysis.nextSteps.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wide mb-2 flex items-center gap-1"><Target className="w-3 h-3" /> Recommended Next Steps</p>
+                      <div className="space-y-1.5">
+                        {aiAnalysis.nextSteps.map((step, i) => (
+                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-yellow-500/5 border border-yellow-500/15">
+                            <span className="text-yellow-400 text-xs font-bold mt-0.5">{i + 1}.</span>
+                            <p className="text-xs text-foreground">{step}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <Sparkles className="w-8 h-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-xs text-muted-foreground">Click &quot;Generate Analysis&quot; to get AI-powered insights about your project&apos;s health, risks, and recommendations.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Smart Recommendations */}
+            {data && (() => {
+              const recommendations: Array<{ type: 'warning' | 'success' | 'info' | 'danger'; title: string; detail: string }> = []
+
+              // Overdue tasks
+              const overdueTodos = todos.filter((t) => t.deadline && new Date(t.deadline) < new Date() && t.status !== 'completed')
+              if (overdueTodos.length > 0) recommendations.push({ type: 'danger', title: `${overdueTodos.length} overdue task${overdueTodos.length > 1 ? 's' : ''}`, detail: `"${overdueTodos[0].title}"${overdueTodos.length > 1 ? ` and ${overdueTodos.length - 1} more` : ''} — consider re-prioritizing or updating deadlines.` })
+
+              // Stale PRs
+              const stalePRs = data.pullRequests?.filter((p) => p.state === 'open' && (Date.now() - new Date(p.opened_at).getTime()) > 3 * 24 * 3600 * 1000).length || 0
+              if (stalePRs > 0) recommendations.push({ type: 'warning', title: `${stalePRs} stale pull request${stalePRs > 1 ? 's' : ''}`, detail: 'PRs open for 3+ days slow down velocity. Review or close them to keep the pipeline moving.' })
+
+              // Health score low
+              if (data.overview.healthScore < 50) recommendations.push({ type: 'danger', title: 'Health score is critical', detail: `At ${data.overview.healthScore}/100 — focus on resolving open issues and merging PRs to improve.` })
+              else if (data.overview.healthScore < 75) recommendations.push({ type: 'warning', title: 'Health score needs attention', detail: `At ${data.overview.healthScore}/100 — good progress but room for improvement.` })
+              else recommendations.push({ type: 'success', title: 'Project health is good', detail: `Score: ${data.overview.healthScore}/100 — keep up the momentum!` })
+
+              // Blockers from messages
+              const blockerMsgs = realtimeMessages.filter((m) => m.intent === 'blocker')
+              if (blockerMsgs.length > 0) recommendations.push({ type: 'danger', title: `${blockerMsgs.length} blocker${blockerMsgs.length > 1 ? 's' : ''} reported`, detail: `Latest: "${blockerMsgs[0].content.slice(0, 80)}${blockerMsgs[0].content.length > 80 ? '...' : ''}" — by ${blockerMsgs[0].author_username}` })
+
+              // Bus factor risk
+              if (data.codebaseBusFactor !== undefined && data.codebaseBusFactor <= 1) recommendations.push({ type: 'warning', title: 'Bus factor risk', detail: 'Only 1 person knows critical parts of the codebase. Encourage pair programming or code reviews.' })
+
+              // High WIP
+              if (data.overview.totalWIP > 5) recommendations.push({ type: 'warning', title: 'High work-in-progress', detail: `${data.overview.totalWIP} items in WIP — consider finishing existing work before starting new tasks.` })
+
+              // No tasks yet
+              if (todos.length === 0) recommendations.push({ type: 'info', title: 'No tasks defined yet', detail: 'Add tasks below to track your project milestones and see completion progress.' })
+
+              // All tasks done
+              const allDone = todos.length > 0 && todos.every((t) => t.status === 'completed')
+              if (allDone) recommendations.push({ type: 'success', title: 'All tasks completed!', detail: 'Great job! Consider adding new milestones for the next phase.' })
+
+              // Open issues vs. team size
+              const teamSize = data.teamStats?.length || data.members?.length || 1
+              const openIssues = data.issues?.filter((i) => i.state === 'open').length || 0
+              if (openIssues > teamSize * 3) recommendations.push({ type: 'warning', title: 'Issue backlog growing', detail: `${openIssues} open issues for a team of ${teamSize} — consider triaging and closing outdated ones.` })
+
+              const recColors = { danger: 'border-red-500/30 bg-red-500/5', warning: 'border-yellow-500/30 bg-yellow-500/5', success: 'border-emerald-500/30 bg-emerald-500/5', info: 'border-blue-500/30 bg-blue-500/5' }
+              const recIcons = { danger: <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />, warning: <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />, success: <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />, info: <Info className="w-4 h-4 text-blue-400 shrink-0" /> }
+
+              return (
+                <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-purple-400" /> Smart Recommendations
+                  </h3>
+                  <p className="text-xs text-muted-foreground">AI-generated insights based on your project data, tasks, and team activity</p>
+                  <div className="space-y-2">
+                    {recommendations.map((r, i) => (
+                      <div key={i} className={`flex items-start gap-3 p-3 rounded-lg border ${recColors[r.type]}`}>
+                        {recIcons[r.type]}
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">{r.title}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{r.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Blockers & Action Items */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Flame className="w-4 h-4 text-red-400" /> Blockers & Action Items
+              </h3>
+              <p className="text-xs text-muted-foreground">Auto-detected from team messages — blockers, task claims, and progress updates</p>
+              {(() => {
+                const blockers = realtimeMessages.filter((m) => m.intent === 'blocker')
+                const taskClaims = realtimeMessages.filter((m) => m.intent === 'task_claim')
+                const progressUpdates = realtimeMessages.filter((m) => m.intent === 'progress_update')
+                if (blockers.length === 0 && taskClaims.length === 0 && progressUpdates.length === 0) {
+                  return <p className="text-xs text-muted-foreground italic">No blockers or action items detected yet. Messages with phrases like &quot;stuck on&quot;, &quot;I&apos;ll handle&quot;, or &quot;just pushed&quot; are auto-classified.</p>
+                }
+                return (
+                  <div className="space-y-4">
+                    {blockers.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">Blockers ({blockers.length})</p>
+                        <div className="space-y-1.5">
+                          {blockers.slice(0, 5).map((m) => (
+                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-red-500/5 border border-red-500/15">
+                              <AlertCircle className="w-3 h-3 text-red-400 mt-0.5 shrink-0" />
+                              <div>
+                                <p className="text-xs text-foreground">{m.content}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {taskClaims.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide mb-1.5">Task Claims ({taskClaims.length})</p>
+                        <div className="space-y-1.5">
+                          {taskClaims.slice(0, 5).map((m) => (
+                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-blue-500/5 border border-blue-500/15">
+                              <Target className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
+                              <div>
+                                <p className="text-xs text-foreground">{m.content}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {progressUpdates.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1.5">Progress Updates ({progressUpdates.length})</p>
+                        <div className="space-y-1.5">
+                          {progressUpdates.slice(0, 5).map((m) => (
+                            <div key={m.id} className="flex items-start gap-2 p-2 rounded bg-emerald-500/5 border border-emerald-500/15">
+                              <CheckCircle className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
+                              <div>
+                                <p className="text-xs text-foreground">{m.content}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">— {m.author_username}, {formatDistanceToNow(new Date(m.sent_at), { addSuffix: true })}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+
+            {/* Team Workload Distribution */}
+            {data?.teamStats && data.teamStats.length > 0 && (
+              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-400" /> Team Workload
+                </h3>
+                <p className="text-xs text-muted-foreground">Contribution distribution across team members</p>
+                <div className="space-y-2">
+                  {data.teamStats.slice(0, 8).map((member) => {
+                    const maxCommits = Math.max(...data.teamStats!.map((m) => m.commits), 1)
+                    const pct = Math.round((member.commits / maxCommits) * 100)
+                    return (
+                      <div key={member.username} className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 w-32 shrink-0">
+                          {member.avatar_url ? (
+                            <img src={member.avatar_url} alt="" className="w-5 h-5 rounded-full" />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[8px] font-bold text-primary">{member.username[0].toUpperCase()}</div>
+                          )}
+                          <span className="text-xs text-foreground truncate">{member.username}</span>
+                        </div>
+                        <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
+                          <div className="h-full rounded-full bg-indigo-500/60 transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground w-16 text-right">{member.commits} commits</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Todo List */}
+            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Target className="w-4 h-4 text-emerald-400" /> Tasks & Deadlines
+                </h3>
+                <button
+                  onClick={() => setShowAddTodo(!showAddTodo)}
+                  className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1.5"
+                >
+                  <Plus className="w-3 h-3" /> Add Task
+                </button>
+              </div>
+
+              {/* Add Todo Form */}
+              {showAddTodo && (
+                <div className="bg-muted/50 border border-border rounded-lg p-4 space-y-3">
+                  <input
+                    value={newTodoTitle}
+                    onChange={(e) => setNewTodoTitle(e.target.value)}
+                    placeholder="Task title *"
+                    className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    maxLength={200}
+                  />
+                  <textarea
+                    value={newTodoDesc}
+                    onChange={(e) => setNewTodoDesc(e.target.value)}
+                    placeholder="Description (optional)"
+                    className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                    rows={2}
+                  />
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex-1 min-w-[120px]">
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Priority</label>
+                      <select
+                        value={newTodoPriority}
+                        onChange={(e) => setNewTodoPriority(e.target.value as 'low' | 'medium' | 'high' | 'critical')}
+                        className="w-full mt-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[160px]">
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wide">Deadline</label>
+                      <input
+                        type="datetime-local"
+                        value={newTodoDeadline}
+                        onChange={(e) => setNewTodoDeadline(e.target.value)}
+                        className="w-full mt-1 px-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!newTodoTitle.trim() || addingTodo) return
+                        setAddingTodo(true)
+                        try {
+                          const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              title: newTodoTitle.trim(),
+                              description: newTodoDesc.trim() || null,
+                              priority: newTodoPriority,
+                              deadline: newTodoDeadline ? new Date(newTodoDeadline).toISOString() : null,
+                            }),
+                          })
+                          if (res.ok) {
+                            const { todo } = await res.json()
+                            setTodos((prev) => [todo, ...prev])
+                            setNewTodoTitle('')
+                            setNewTodoDesc('')
+                            setNewTodoPriority('medium')
+                            setNewTodoDeadline('')
+                            setShowAddTodo(false)
+                            toast.success('Task added')
+                          } else {
+                            const d = await res.json()
+                            toast.error(d.error || 'Failed to add task')
+                          }
+                        } catch { toast.error('Failed to add task') }
+                        finally { setAddingTodo(false) }
+                      }}
+                      disabled={addingTodo || !newTodoTitle.trim()}
+                      className="px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {addingTodo ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Save className="w-3 h-3" />}
+                      Create
+                    </button>
+                    <button onClick={() => setShowAddTodo(false)} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fetch todos on mount */}
+              {todosLoading ? (
+                <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>
+              ) : todos.length === 0 ? (
+                <div className="text-center py-8">
+                  <ListTodo className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">No tasks yet. Add your first task to track project progress!</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {todos.map((todo) => {
+                    const isOverdue = todo.deadline && new Date(todo.deadline) < new Date() && todo.status !== 'completed'
+                    const priorityColors: Record<string, string> = {
+                      low: 'text-zinc-400',
+                      medium: 'text-blue-400',
+                      high: 'text-orange-400',
+                      critical: 'text-red-400',
+                    }
+                    const statusIcons: Record<string, React.ReactNode> = {
+                      pending: <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/40" />,
+                      'in-progress': <CircleDot className="w-4 h-4 text-blue-400" />,
+                      completed: <CheckCircle className="w-4 h-4 text-emerald-400" />,
+                    }
+                    return (
+                      <div key={todo.id} className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                        todo.status === 'completed' ? 'bg-emerald-500/5 border-emerald-500/20 opacity-70' :
+                        isOverdue ? 'bg-red-500/5 border-red-500/20' : 'bg-muted/30 border-border hover:bg-muted/50'
+                      }`}>
+                        <button
+                          onClick={async () => {
+                            const nextStatus = todo.status === 'pending' ? 'in-progress' : todo.status === 'in-progress' ? 'completed' : 'pending'
+                            try {
+                              const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+                                method: 'PATCH',
+                                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: todo.id, status: nextStatus }),
+                              })
+                              if (res.ok) {
+                                const { todo: updated } = await res.json()
+                                setTodos((prev) => prev.map((t) => t.id === updated.id ? updated : t))
+                                if (nextStatus === 'completed') toast.success('Task completed!')
+                              }
+                            } catch { toast.error('Failed to update task') }
+                          }}
+                          className="mt-0.5 shrink-0 hover:scale-110 transition-transform"
+                          title={`Click to mark as ${todo.status === 'pending' ? 'in-progress' : todo.status === 'in-progress' ? 'completed' : 'pending'}`}
+                        >
+                          {statusIcons[todo.status]}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`text-xs font-medium ${todo.status === 'completed' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{todo.title}</p>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`text-[10px] font-medium ${priorityColors[todo.priority]}`}>{todo.priority}</span>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch(`/api/workspaces/${workspaceId}/todos`, {
+                                      method: 'DELETE',
+                                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ id: todo.id }),
+                                    })
+                                    if (res.ok) {
+                                      setTodos((prev) => prev.filter((t) => t.id !== todo.id))
+                                      toast.success('Task deleted')
+                                    }
+                                  } catch { toast.error('Failed to delete task') }
+                                }}
+                                className="p-0.5 text-muted-foreground hover:text-red-400 transition-colors"
+                                title="Delete task"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                          {todo.description && <p className="text-[10px] text-muted-foreground mt-0.5">{todo.description}</p>}
+                          <div className="flex items-center gap-3 mt-1.5">
+                            {todo.deadline && (
+                              <span className={`text-[10px] flex items-center gap-1 ${isOverdue ? 'text-red-400 font-medium' : 'text-muted-foreground'}`}>
+                                <Calendar className="w-2.5 h-2.5" />
+                                {isOverdue ? 'Overdue: ' : ''}{new Date(todo.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatDistanceToNow(new Date(todo.created_at), { addSuffix: true })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Commit Activity Insights */}
+            {data && (
+              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4 text-cyan-400" /> Commit Type Breakdown
+                </h3>
+                <p className="text-xs text-muted-foreground">Distribution of commit types detected by AI classification</p>
+                {(() => {
+                  const typeCounts: Record<string, number> = {}
+                  data.recentCommits?.forEach((c) => {
+                    const t = c.commit_type || 'other'
+                    typeCounts[t] = (typeCounts[t] || 0) + 1
+                  })
+                  const entries = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])
+                  const total = data.recentCommits?.length || 1
+                  if (entries.length === 0) return <p className="text-xs text-muted-foreground italic">No commits analyzed yet.</p>
+                  return (
+                    <div className="space-y-2">
+                      {entries.map(([type, count]) => (
+                        <div key={type} className="flex items-center gap-3">
+                          <span className={`text-[10px] font-medium uppercase w-16 shrink-0 px-1.5 py-0.5 rounded text-center ${TYPE_COLORS[type] || 'bg-zinc-500/20 text-zinc-400'}`}>{type}</span>
+                          <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
+                            <div className="h-full rounded-full bg-primary/60 transition-all" style={{ width: `${(count / total) * 100}%` }} />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground w-8 text-right">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            {/* Weekly Velocity */}
+            {data && data.recentCommits && data.recentCommits.length > 0 && (
+              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-yellow-400" /> Development Velocity
+                </h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total Commits</p>
+                    <p className="text-lg font-bold text-foreground">{data.recentCommits.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Open PRs</p>
+                    <p className="text-lg font-bold text-foreground">{data.pullRequests?.filter((p: { state: string }) => p.state === 'open').length || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Issues</p>
+                    <p className="text-lg font-bold text-foreground">{data.issues?.filter((i: { state: string }) => i.state === 'open').length || 0}</p>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}

@@ -281,7 +281,10 @@ export default function DashboardPage() {
         {/* Create workspace modal */}
         {showCreate && (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-card border border-border rounded-xl w-full max-w-md p-6">
+            <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 relative">
+              <button type="button" onClick={() => setShowCreate(false)} className="absolute top-4 right-4 p-1 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
               <h2 className="text-lg font-semibold text-foreground mb-5">Create Workspace</h2>
               <form onSubmit={createWorkspace} className="space-y-4">
                 <div>
