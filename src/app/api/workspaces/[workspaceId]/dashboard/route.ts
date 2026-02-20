@@ -55,19 +55,61 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         .select('file_path, author_github_username, lines_added, lines_modified, commit_count')
         .eq('workspace_id', workspaceId)
 
-      const fileMap: Record<string, Array<{ author_github_username: string; lines_added: number; lines_modified: number }>> = {}
-      for (const fa of fileAuthorship ?? []) {
-        if (!fileMap[fa.file_path]) fileMap[fa.file_path] = []
-        fileMap[fa.file_path].push(fa)
+      let criticalFiles: Array<{ file: string; busFactor: number; dominant_author: string | null; concentration: number; authorCount: number }> = []
+
+      if (fileAuthorship && fileAuthorship.length > 0) {
+        // Per-file bus factor from authorship data
+        const fileMap: Record<string, Array<{ author_github_username: string; lines_added: number; lines_modified: number }>> = {}
+        for (const fa of fileAuthorship) {
+          if (!fileMap[fa.file_path]) fileMap[fa.file_path] = []
+          fileMap[fa.file_path].push(fa)
+        }
+        criticalFiles = Object.entries(fileMap)
+          .map(([file, authors]) => {
+            const { busFactor, dominant_author, concentration } = calculateKnowledgeConcentration(authors)
+            return { file, busFactor, dominant_author, concentration, authorCount: authors.length }
+          })
+          .filter((f) => f.concentration > 80)
+          .sort((a, b) => b.concentration - a.concentration)
+          .slice(0, 10)
+      } else {
+        // Fallback: derive bus factor from live contributor commit counts
+        // Shows contributor-level concentration instead of per-file
+        const totalContributions = live.contributors.reduce((s, c) => s + c.contributions, 0)
+        if (totalContributions > 0 && live.contributors.length > 0) {
+          const sorted = [...live.contributors].sort((a, b) => b.contributions - a.contributions)
+          // Each "entry" represents a contributor's share of all commits
+          criticalFiles = sorted.map((c) => {
+            const concentration = (c.contributions / totalContributions) * 100
+            // Bus factor: how many top contributors cover 50% of commits
+            let covered = 0; let bf = 0
+            for (const s of sorted) {
+              covered += s.contributions; bf++
+              if (covered / totalContributions >= 0.5) break
+            }
+            return {
+              file: `@${c.username}`,
+              busFactor: bf,
+              dominant_author: c.username,
+              concentration: Math.round(concentration * 10) / 10,
+              authorCount: live.contributors.length,
+            }
+          }).filter((f) => f.concentration > 20)
+            .slice(0, 10)
+        }
       }
-      const criticalFiles = Object.entries(fileMap)
-        .map(([file, authors]) => {
-          const { busFactor, dominant_author, concentration } = calculateKnowledgeConcentration(authors)
-          return { file, busFactor, dominant_author, concentration, authorCount: authors.length }
-        })
-        .filter((f) => f.concentration > 80)
-        .sort((a, b) => b.concentration - a.concentration)
-        .slice(0, 10)
+
+      // Codebase-level bus factor summary (always computed from contributors)
+      const totalContributions = live.contributors.reduce((s, c) => s + c.contributions, 0)
+      let codebaseBusFactor = 0
+      if (totalContributions > 0) {
+        const sorted = [...live.contributors].sort((a, b) => b.contributions - a.contributions)
+        let covered = 0
+        for (const c of sorted) {
+          covered += c.contributions; codebaseBusFactor++
+          if (covered / totalContributions >= 0.5) break
+        }
+      }
 
       // Health score — weighted multi-signal formula
       // Formula: H = w1*C + w2*P + w3*I + w4*A + w5*D - penalties
@@ -254,6 +296,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
         })),
         alerts: alertsData ?? [],
         criticalFiles,
+        codebaseBusFactor,
         members: members ?? [],
         healthHistory: [],
         wipPerUser: (() => {

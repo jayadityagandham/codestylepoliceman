@@ -20,6 +20,7 @@ interface DashboardData {
   issues: Array<{ github_issue_number: number; title: string; state: string; assignee_github_username: string | null; opened_at: string; labels?: string[] }>
   alerts: Array<{ id: string; type: string; severity: string; title: string; description: string; created_at: string; resolved: boolean }>
   criticalFiles: Array<{ file: string; busFactor: number; dominant_author: string | null; concentration: number; authorCount: number }>
+  codebaseBusFactor?: number
   members: Array<{ role: string; user: { id: string; name: string; avatar_url: string | null; github_username: string | null } }>
   healthHistory: Array<{ score: number; snapshot_at: string }>
   wipPerUser: Array<{ username: string; count: number }>
