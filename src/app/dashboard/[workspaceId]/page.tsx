@@ -9,7 +9,7 @@ import {
   GitCommit, GitPullRequest, AlertTriangle, Users, Activity, Clock, TrendingUp,
   Shield, RefreshCw, Download, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
-  ChevronLeft, Search, Hash, Github, LogOut, Send
+  ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -375,6 +375,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [unbindLoading, setUnbindLoading] = useState(false)
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+  const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null)
+
+  // Derive admin status from members data
+  const isAdmin = data?.members?.some((m) => m.user?.id === user?.id && m.role === 'admin') ?? false
 
   useEffect(() => {
     if (!user) router.push('/')
@@ -1563,6 +1568,34 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                               </div>
                             )}
                           </div>
+                          {isAdmin && !msg.id.startsWith('opt-') && (
+                            <button
+                              onClick={async () => {
+                                if (deletingMsgId) return
+                                setDeletingMsgId(msg.id)
+                                try {
+                                  const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
+                                    method: 'DELETE',
+                                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ message_id: msg.id }),
+                                  })
+                                  if (res.ok) {
+                                    setRealtimeMessages((prev) => prev.filter((m) => m.id !== msg.id))
+                                    toast.success('Message deleted')
+                                  } else {
+                                    const d = await res.json()
+                                    toast.error(d.error || 'Failed to delete')
+                                  }
+                                } catch { toast.error('Failed to delete message') }
+                                finally { setDeletingMsgId(null) }
+                              }}
+                              disabled={deletingMsgId === msg.id}
+                              className="shrink-0 p-1.5 text-muted-foreground hover:text-red-400 transition-colors rounded-md hover:bg-red-500/10 disabled:opacity-50"
+                              title="Delete message (admin)"
+                            >
+                              {deletingMsgId === msg.id ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
@@ -1935,9 +1968,40 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                           {m.user?.github_username && <p className="text-[10px] text-muted-foreground">@{m.user.github_username}</p>}
                         </div>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                        {m.role}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                          {m.role}
+                        </span>
+                        {isAdmin && m.user?.id !== user?.id && (
+                          <button
+                            onClick={async () => {
+                              if (removingMemberId) return
+                              if (!confirm(`Remove ${m.user?.name ?? 'this member'} from the workspace?`)) return
+                              setRemovingMemberId(m.user?.id ?? null)
+                              try {
+                                const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+                                  method: 'DELETE',
+                                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ target_user_id: m.user?.id }),
+                                })
+                                if (res.ok) {
+                                  toast.success(`${m.user?.name ?? 'Member'} removed`)
+                                  refetch()
+                                } else {
+                                  const d = await res.json()
+                                  toast.error(d.error || 'Failed to remove member')
+                                }
+                              } catch { toast.error('Failed to remove member') }
+                              finally { setRemovingMemberId(null) }
+                            }}
+                            disabled={removingMemberId === m.user?.id}
+                            className="p-1 text-muted-foreground hover:text-red-400 transition-colors rounded-md hover:bg-red-500/10 disabled:opacity-50"
+                            title="Remove member"
+                          >
+                            {removingMemberId === m.user?.id ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <UserMinus className="w-3 h-3" />}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
