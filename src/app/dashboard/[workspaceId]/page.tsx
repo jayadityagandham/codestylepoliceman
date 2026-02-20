@@ -9,7 +9,7 @@ import {
   GitCommit, GitPullRequest, AlertTriangle, Users, Activity, Clock, TrendingUp,
   Shield, RefreshCw, Download, Bell, GitBranch, ChevronRight, Copy, X,
   CheckCircle, AlertCircle, Info, Zap, BarChart2, BookOpen, MessageSquare,
-  ChevronLeft, Search, Hash, Github, LogOut
+  ChevronLeft, Search, Hash, Github, LogOut, Send
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -223,6 +223,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [prsPage, setPrsPage] = useState(0)
   const [issuesPage, setIssuesPage] = useState(0)
   const [msgSearch, setMsgSearch] = useState('')
+  const [msgInput, setMsgInput] = useState('')
+  const [sendingMsg, setSendingMsg] = useState(false)
   const PAGE_SIZE = 10
 
   // Repo binding state
@@ -525,12 +527,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                         <Github className="w-3.5 h-3.5" />
                         <span>@{user.github_username}</span>
-                      </div>
-                    )}
-                    {user?.discord_username && (
-                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>{user.discord_username}</span>
                       </div>
                     )}
                   </div>
@@ -1254,7 +1250,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
         {tab === 'messages' && data && (
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-4">
-              <h2 className="text-sm font-semibold text-foreground">Communication Messages ({data.messages?.length ?? 0})</h2>
+              <h2 className="text-sm font-semibold text-foreground">Team Messages ({data.messages?.length ?? 0})</h2>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <input
@@ -1266,11 +1262,61 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                 />
               </div>
             </div>
+
+            {/* Compose bar */}
+            <div className="bg-card border border-border rounded-xl p-3">
+              <form onSubmit={async (e) => {
+                e.preventDefault()
+                if (!msgInput.trim() || sendingMsg || !token) return
+                setSendingMsg(true)
+                try {
+                  const res = await fetch(`/api/workspaces/${workspaceId}/messages`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: msgInput.trim() }),
+                  })
+                  if (res.ok) {
+                    setMsgInput('')
+                    refetch()
+                    toast.success('Message sent')
+                  } else {
+                    const d = await res.json()
+                    toast.error(d.error || 'Failed to send')
+                  }
+                } catch { toast.error('Failed to send message') }
+                finally { setSendingMsg(false) }
+              }} className="flex items-end gap-2">
+                <textarea
+                  value={msgInput}
+                  onChange={(e) => setMsgInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      e.currentTarget.form?.requestSubmit()
+                    }
+                  }}
+                  placeholder="Type a message to your team... (Enter to send, Shift+Enter for new line)"
+                  rows={1}
+                  className="flex-1 px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none min-h-[36px] max-h-[120px]"
+                  style={{ height: 'auto', overflow: 'hidden' }}
+                  onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px' }}
+                />
+                <button
+                  type="submit"
+                  disabled={sendingMsg || !msgInput.trim()}
+                  className="px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                >
+                  {sendingMsg ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Send className="w-3 h-3" />}
+                  Send
+                </button>
+              </form>
+            </div>
+
             {(!data.messages || data.messages.length === 0) ? (
-              <div className="bg-card border border-border rounded-xl py-16 text-center">
+              <div className="bg-card border border-border rounded-xl py-12 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">No messages ingested yet.</p>
-                <p className="text-xs text-muted-foreground mt-1">Connect Discord or WhatsApp to start capturing team communication.</p>
+                <p className="text-sm text-muted-foreground">No messages yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Send the first message to your team above!</p>
               </div>
             ) : (
               <div className="bg-card border border-border rounded-xl overflow-hidden divide-y divide-border">
@@ -1280,44 +1326,50 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     const q = msgSearch.toLowerCase()
                     return m.content.toLowerCase().includes(q) || m.author_username.toLowerCase().includes(q) || (m.channel_name ?? '').toLowerCase().includes(q)
                   })
-                  .map((msg) => (
-                    <div key={msg.id} className="px-5 py-3.5 hover:bg-muted/30 transition-colors">
-                      <div className="flex items-start gap-3">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${msg.source === 'discord' ? 'bg-indigo-500/20' : 'bg-emerald-500/20'}`}>
-                          <span className={`text-[9px] font-bold ${msg.source === 'discord' ? 'text-indigo-400' : 'text-emerald-400'}`}>
-                            {msg.source === 'discord' ? 'D' : 'W'}
-                          </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-xs font-medium text-foreground">{msg.author_username}</span>
-                            {msg.channel_name && (
-                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                                <Hash className="w-2.5 h-2.5" />{msg.channel_name}
-                              </span>
-                            )}
-                            <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
-                              {formatDistanceToNow(new Date(msg.sent_at), { addSuffix: true })}
-                            </span>
+                  .map((msg) => {
+                    const sourceConfig: Record<string, { bg: string; text: string; label: string }> = {
+                      app: { bg: 'bg-primary/20', text: 'text-primary', label: 'CSP' },
+                      discord: { bg: 'bg-indigo-500/20', text: 'text-indigo-400', label: 'D' },
+                      whatsapp: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', label: 'W' },
+                    }
+                    const src = sourceConfig[msg.source] ?? sourceConfig.app
+                    return (
+                      <div key={msg.id} className="px-5 py-3.5 hover:bg-muted/30 transition-colors">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${src.bg}`}>
+                            <span className={`text-[9px] font-bold ${src.text}`}>{src.label}</span>
                           </div>
-                          <p className="text-xs text-foreground/80 whitespace-pre-wrap break-words">{msg.content}</p>
-                          {msg.intent && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                msg.intent === 'blocker' ? 'bg-red-500/10 text-red-400' :
-                                msg.intent === 'status_update' ? 'bg-blue-500/10 text-blue-400' :
-                                msg.intent === 'question' ? 'bg-yellow-500/10 text-yellow-400' :
-                                msg.intent === 'decision' ? 'bg-purple-500/10 text-purple-400' :
-                                'bg-zinc-500/10 text-zinc-400'
-                              }`}>
-                                {msg.intent.replace(/_/g, ' ')}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="text-xs font-medium text-foreground">{msg.author_username}</span>
+                              {msg.channel_name && (
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <Hash className="w-2.5 h-2.5" />{msg.channel_name}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                                {formatDistanceToNow(new Date(msg.sent_at), { addSuffix: true })}
                               </span>
                             </div>
-                          )}
+                            <p className="text-xs text-foreground/80 whitespace-pre-wrap break-words">{msg.content}</p>
+                            {msg.intent && msg.intent !== 'general' && (
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                  msg.intent === 'blocker' ? 'bg-red-500/10 text-red-400' :
+                                  msg.intent === 'status_update' ? 'bg-blue-500/10 text-blue-400' :
+                                  msg.intent === 'question' ? 'bg-yellow-500/10 text-yellow-400' :
+                                  msg.intent === 'decision' ? 'bg-purple-500/10 text-purple-400' :
+                                  'bg-zinc-500/10 text-zinc-400'
+                                }`}>
+                                  {msg.intent.replace(/_/g, ' ')}
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
               </div>
             )}
           </div>
@@ -1662,25 +1714,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </button>
                 </div>
               )}
-            </div>
-
-            {/* Discord */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Activity className="w-4 h-4" /> Discord Integration
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Configure your Discord bot to POST messages to:
-              </p>
-              <div className="flex items-center gap-2 bg-muted rounded-lg p-3">
-                <code className="flex-1 text-xs text-foreground break-all">
-                  POST {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/discord
-                </code>
-                <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/discord`); toast.success('Copied!') }} className="p-1 text-muted-foreground hover:text-foreground">
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">Auth header: <code className="text-foreground">Authorization: Bearer {'<DISCORD_BOT_TOKEN>'}</code></p>
             </div>
 
             {/* Members */}
