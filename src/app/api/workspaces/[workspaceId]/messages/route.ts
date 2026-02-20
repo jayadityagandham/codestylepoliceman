@@ -3,35 +3,33 @@ import { requireAuth } from '@/lib/auth-middleware'
 import { createServiceClient } from '@/lib/supabase'
 import { detectIntent, extractEntities } from '@/lib/nlp'
 
-async function ensureMessagesTable(db: ReturnType<typeof createServiceClient>) {
-  // Check if the table exists by doing a lightweight select
-  const { error } = await db.from('communication_messages').select('id').limit(1)
-  if (error && (error.message.includes('does not exist') || error.code === '42P01' || error.message.includes('relation'))) {
-    // Table doesn't exist — create it via RPC or raw SQL
-    const { error: createErr } = await db.rpc('exec_sql', {
-      query: `
-        CREATE TABLE IF NOT EXISTS communication_messages (
-          id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-          workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-          source text NOT NULL DEFAULT 'app',
-          channel_name text,
-          author_username text NOT NULL,
-          content text NOT NULL,
-          sent_at timestamptz NOT NULL DEFAULT now(),
-          intent text,
-          entities jsonb,
-          created_at timestamptz DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS idx_comm_msg_workspace ON communication_messages(workspace_id, sent_at DESC);
-      `,
-    })
-    // If RPC doesn't exist, the table truly doesn't exist and we can't auto-create — fall back gracefully
-    if (createErr) {
-      console.error('[messages] Could not auto-create communication_messages table:', createErr.message)
-      return false
-    }
+// We use the existing discord_messages table for all messages.
+// In-app messages use author_discord_id = 'app' to distinguish from Discord messages.
+// The front-end maps: author_discord_id === 'app' → source 'app', else → source 'discord'.
+
+interface RawMsg {
+  id: string
+  channel_name: string | null
+  author_discord_id: string | null
+  author_username: string
+  content: string
+  sent_at: string
+  intent: string | null
+  entities: Record<string, unknown> | null
+  is_blocker: boolean | null
+}
+
+function mapMessage(m: RawMsg) {
+  return {
+    id: m.id,
+    source: m.author_discord_id === 'app' ? 'app' : 'discord',
+    channel_name: m.channel_name,
+    author_username: m.author_username,
+    content: m.content,
+    sent_at: m.sent_at,
+    intent: m.intent,
+    entities: m.entities,
   }
-  return true
 }
 
 // GET /api/workspaces/:id/messages — fetch messages
@@ -49,15 +47,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     .single()
   if (!member) return NextResponse.json({ error: 'Not a member' }, { status: 403 })
 
-  const tableOk = await ensureMessagesTable(db)
-  if (!tableOk) {
-    // Table doesn't exist and can't be created — return empty list instead of crashing
-    return NextResponse.json({ messages: [] })
-  }
-
-  const { data: messages, error: fetchErr } = await db
-    .from('communication_messages')
-    .select('id, source, channel_name, author_username, content, sent_at, intent, entities')
+  const { data: rows, error: fetchErr } = await db
+    .from('discord_messages')
+    .select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities, is_blocker')
     .eq('workspace_id', workspaceId)
     .order('sent_at', { ascending: false })
     .limit(100)
@@ -67,7 +59,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ work
     return NextResponse.json({ messages: [] })
   }
 
-  return NextResponse.json({ messages: messages ?? [] })
+  return NextResponse.json({ messages: (rows ?? []).map(mapMessage) })
 }
 
 // POST /api/workspaces/:id/messages — send a new in-app message
@@ -98,37 +90,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
   const intent = detectIntent(trimmed)
   const entities = extractEntities(trimmed)
 
-  const tableOk = await ensureMessagesTable(db)
-  if (!tableOk) {
-    return NextResponse.json({ error: 'Messages table is not available. Please create the communication_messages table in Supabase.' }, { status: 503 })
-  }
-
-  // Try insert with all columns first, then fall back for older schemas
-  const row = {
-    workspace_id: workspaceId,
-    source: 'app',
-    channel_name: 'general',
-    author_username: user!.name ?? user!.email ?? 'Unknown',
-    content: trimmed,
-    intent,
-    entities,
-    sent_at: new Date().toISOString(),
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let msg: any = null
-
-  const { data: d1, error: e1 } = await db
-    .from('communication_messages')
-    .insert(row)
-    .select('id, source, channel_name, author_username, content, sent_at, intent, entities')
+  const { data: row, error: insertErr } = await db
+    .from('discord_messages')
+    .insert({
+      workspace_id: workspaceId,
+      message_id: `app-${Date.now()}`,
+      channel_id: 'app',
+      channel_name: 'general',
+      author_discord_id: 'app',
+      author_username: user!.name ?? user!.email ?? 'Unknown',
+      content: trimmed,
+      intent,
+      entities,
+      is_blocker: entities.isBlocker ?? false,
+      sent_at: new Date().toISOString(),
+    })
+    .select('id, channel_name, author_discord_id, author_username, content, sent_at, intent, entities, is_blocker')
     .single()
 
-  if (e1) {
-    console.error('[messages POST] insert error:', e1.message, e1.code, e1.details)
-    return NextResponse.json({ error: `Failed to send message: ${e1.message}` }, { status: 500 })
+  if (insertErr) {
+    console.error('[messages POST] insert error:', insertErr.message, insertErr.code, insertErr.details)
+    return NextResponse.json({ error: `Failed to send message: ${insertErr.message}` }, { status: 500 })
   }
-  msg = d1
 
   // Auto-create blocker alert if NLP detects blocker
   if (entities.isBlocker) {
@@ -144,5 +127,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ wor
     })
   }
 
-  return NextResponse.json({ message: msg })
+  return NextResponse.json({ message: mapMessage(row as RawMsg) })
 }

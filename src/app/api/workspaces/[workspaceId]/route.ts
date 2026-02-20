@@ -83,7 +83,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ w
     'cycle_time_metrics',
     'alerts',
     'file_authorship',
-    'communication_messages',
     'discord_messages',
     'commits',
     'pull_requests',
