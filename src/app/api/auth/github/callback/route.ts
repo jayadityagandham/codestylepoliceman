@@ -3,15 +3,16 @@ import { createServiceClient } from '@/lib/supabase'
 import { signJWT } from '@/lib/jwt'
 
 export async function GET(req: NextRequest) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin
   const code = req.nextUrl.searchParams.get('code')
   const state = req.nextUrl.searchParams.get('state')
   const storedState = req.cookies.get('github_oauth_state')?.value
 
   if (!code) {
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=no_code`)
+    return NextResponse.redirect(`${appUrl}/?error=no_code`)
   }
   if (!state || state !== storedState) {
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=invalid_state`)
+    return NextResponse.redirect(`${appUrl}/?error=invalid_state`)
   }
 
   try {
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     })
     const tokenData = await tokenRes.json()
     if (!tokenData.access_token) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=oauth_failed`)
+      return NextResponse.redirect(`${appUrl}/?error=oauth_failed`)
     }
 
     // Get GitHub user
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
     }
 
     const token = await signJWT({ id: user.id, email: user.email, name: user.name })
-    const redirectRes = NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/auth-callback?token=${token}`)
+    const redirectRes = NextResponse.redirect(`${appUrl}/auth-callback?token=${token}`)
     redirectRes.cookies.delete('github_oauth_state')
     // Store GitHub access token in secure HTTP-only cookie for repo API calls
     redirectRes.cookies.set('github_token', tokenData.access_token, {
@@ -87,6 +88,6 @@ export async function GET(req: NextRequest) {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('GitHub OAuth error:', msg, e)
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=server_error&detail=${encodeURIComponent(msg)}`)
+    return NextResponse.redirect(`${appUrl}/?error=server_error&detail=${encodeURIComponent(msg)}`)
   }
 }
