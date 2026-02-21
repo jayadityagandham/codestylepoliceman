@@ -4,7 +4,15 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Plus, GitBranch, LogOut, Shield, Search, Lock, Globe, Loader2, Github, X, Trash2, MessageSquare } from 'lucide-react'
+import { Plus, GitBranch, LogOut, Shield, Search, Lock, Globe, Loader2, Github, X, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import { Separator } from '@/components/ui/separator'
 
 interface Workspace {
   id: string
@@ -38,7 +46,6 @@ export default function DashboardPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ name: '', description: '', github_repo_owner: '', github_repo_name: '' })
-  const [showAccountMenu, setShowAccountMenu] = useState(false)
 
   // GitHub repo picker state
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([])
@@ -70,7 +77,12 @@ export default function DashboardPage() {
         setGithubRepos(data.repos ?? [])
         setReposFetched(true)
       } else {
-        toast.error('Could not fetch GitHub repos. Make sure you signed in with GitHub.')
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 401) {
+          toast.error('GitHub token expired. Please sign out and sign back in with GitHub.')
+        } else {
+          toast.error(data.error || 'Could not fetch GitHub repos. Make sure you signed in with GitHub.')
+        }
       }
     } catch {
       toast.error('Failed to fetch repositories')
@@ -97,7 +109,6 @@ export default function DashboardPage() {
 
   const deleteWorkspace = async (wsId: string) => {
     if (!token) return
-    // Optimistic: remove from UI immediately
     const backup = workspaces
     setWorkspaces((prev) => prev.filter((w) => w.id !== wsId))
     setDeletingId(null)
@@ -109,7 +120,6 @@ export default function DashboardPage() {
       if (res.ok) {
         toast.success('Workspace deleted')
       } else {
-        // Rollback: put workspace back in the list
         setWorkspaces(backup)
         const d = await res.json().catch(() => ({}))
         toast.error(d.error ?? 'Failed to delete workspace')
@@ -148,239 +158,220 @@ export default function DashboardPage() {
   }
 
   if (loading) {
-    return <div className="min-h-screen bg-background flex items-center justify-center"><p className="text-muted-foreground animate-pulse">Loading...</p></div>
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="size-6 border-2 border-foreground border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Dot grid background */}
+      <div className="fixed inset-0 -z-10 bg-[radial-gradient(circle_at_1px_1px,rgba(128,128,128,0.1)_1px,transparent_0)] [background-size:24px_24px]" />
+
       {/* Header */}
-      <header className="border-b border-border px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center">
-            <Shield className="w-4 h-4 text-primary-foreground" />
+      <header className="border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Shield className="size-4.5 text-foreground" />
+            <span className="font-semibold text-foreground text-sm tracking-tight">Code Style Policeman</span>
           </div>
-          <span className="font-semibold text-foreground">Code Style Policeman</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="flex items-center gap-2 p-1 rounded-lg hover:bg-muted transition-colors">
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
-              )}
-              <span className="text-sm text-foreground hidden sm:block">{user?.name}</span>
-            </button>
-            {showAccountMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-semibold text-foreground truncate">{user?.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
-                  </div>
-                  <div className="p-1.5">
-                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">
-                      <LogOut className="w-3.5 h-3.5" /> Sign out
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2.5 p-1.5 rounded-full hover:bg-muted transition-colors outline-none">
+                <Avatar className="size-7 ring-1 ring-border">
+                  {user?.avatar_url && <AvatarImage src={user.avatar_url} />}
+                  <AvatarFallback className="text-xs font-medium bg-muted text-foreground">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                </Avatar>
+                <span className="text-sm font-medium text-foreground hidden sm:block">{user?.name}</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52 p-1.5">
+              <div className="px-2.5 py-2.5">
+                <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              </div>
+              <Separator className="my-1" />
+              <DropdownMenuItem variant="destructive" onClick={() => { logout(); router.push('/') }} className="rounded-md">
+                <LogOut className="size-3.5" /> Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Your Workspaces</h1>
-            <p className="text-sm text-muted-foreground mt-1">Select a workspace to open its command center</p>
-          </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
+      <main className="max-w-3xl mx-auto px-6 py-16">
+        <div className="text-center mb-12">
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Workspaces</h1>
+          <p className="text-sm text-muted-foreground mt-1.5 mb-6">Select a workspace to open its command center</p>
+          <Button onClick={() => setShowCreate(true)} size="sm" className="gap-2">
+            <Plus className="size-3.5" />
             New Workspace
-          </button>
+          </Button>
         </div>
 
         {workspaces.length === 0 && !showCreate ? (
-          <div className="text-center py-20 border border-dashed border-border rounded-xl">
-            <GitBranch className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-            <p className="text-foreground font-medium">No workspaces yet</p>
-            <p className="text-sm text-muted-foreground mt-1 mb-6">Create one to start tracking your team project</p>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
-            >
-              Create Workspace
-            </button>
-          </div>
+          <Card className="py-0 border-dashed border-2 border-border max-w-sm mx-auto">
+            <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+              <GitBranch className="size-7 text-muted-foreground mb-4" />
+              <p className="font-semibold text-foreground">No workspaces yet</p>
+              <p className="text-sm text-muted-foreground mt-1.5 mb-6">Create your first workspace to start tracking team projects</p>
+              <Button onClick={() => setShowCreate(true)} size="sm">
+                Create Workspace
+              </Button>
+            </CardContent>
+          </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {workspaces.map((ws) => (
-              <div
+              <Card
                 key={ws.id}
-                className="relative text-left p-5 bg-card border border-border rounded-xl hover:border-primary/50 transition-colors group"
+                className="py-0 relative group border-border hover:border-foreground/20 transition-colors cursor-pointer"
               >
-                <button
-                  onClick={() => router.push(`/dashboard/${ws.id}`)}
-                  className="w-full text-left"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="w-9 h-9 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <GitBranch className="w-5 h-5 text-primary" />
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${ws.role === 'admin' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                <CardContent className="p-5" onClick={() => router.push(`/dashboard/${ws.id}`)}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <GitBranch className="size-4 text-muted-foreground" />
+                    <Badge variant={ws.role === 'admin' ? 'default' : 'secondary'} className="text-[10px] px-2">
                       {ws.role}
-                    </span>
+                    </Badge>
                   </div>
-                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{ws.name}</h3>
+                  <h3 className="font-semibold text-foreground text-sm">{ws.name}</h3>
                   {ws.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{ws.description}</p>}
                   {ws.github_repo_owner && (
-                    <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                      <GitBranch className="w-3 h-3" />
+                    <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5 font-mono bg-muted/50 rounded-md px-2.5 py-1 w-fit">
+                      <Github className="size-3" />
                       {ws.github_repo_owner}/{ws.github_repo_name}
                     </p>
                   )}
-                </button>
+                </CardContent>
                 {ws.role === 'admin' && (
                   deletingId === ws.id ? (
-                    <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-card border border-red-500/30 rounded-lg px-2.5 py-1.5 shadow-lg z-10">
-                      <span className="text-xs text-red-400 font-medium">Delete?</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id) }}
-                        className="text-xs px-2 py-0.5 bg-red-500 text-white rounded font-medium hover:bg-red-600 transition-colors"
-                      >
+                    <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-background border border-destructive/30 rounded-xl px-3 py-2 shadow-xl z-10">
+                      <span className="text-xs text-destructive font-semibold">Delete?</span>
+                      <Button size="sm" variant="destructive" className="h-6 px-2.5 text-xs rounded-lg" onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id) }}>
                         Yes
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setDeletingId(null) }}
-                        className="text-xs px-2 py-0.5 bg-muted text-muted-foreground rounded font-medium hover:bg-muted/80 transition-colors"
-                      >
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2.5 text-xs rounded-lg" onClick={(e) => { e.stopPropagation(); setDeletingId(null) }}>
                         No
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <button
                       onClick={(e) => { e.stopPropagation(); setDeletingId(ws.id) }}
-                      className="absolute top-3 right-3 p-1.5 text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-400/10"
+                      className="absolute top-4 right-4 p-1.5 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all duration-200 rounded-lg hover:bg-destructive/10"
                       title="Delete workspace"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="size-4" />
                     </button>
                   )
                 )}
-              </div>
+              </Card>
             ))}
           </div>
         )}
 
-        {/* Create workspace modal */}
-        {showCreate && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 relative">
-              <button type="button" onClick={() => setShowCreate(false)} className="absolute top-4 right-4 p-1 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted" aria-label="Close">
-                <X className="w-4 h-4" />
-              </button>
-              <h2 className="text-lg font-semibold text-foreground mb-5">Create Workspace</h2>
-              <form onSubmit={createWorkspace} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Workspace Name *</label>
-                  <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring text-foreground" placeholder="Team Alpha Project" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-                  <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                    className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring text-foreground resize-none" rows={2} placeholder="Capstone project, semester 2..." />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">GitHub Repository</label>
-                  {selectedRepo ? (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-muted border border-border rounded-lg">
-                      <img src={selectedRepo.owner_avatar} alt="" className="w-5 h-5 rounded-full" />
-                      <span className="text-sm text-foreground flex-1 truncate">{selectedRepo.full_name}</span>
-                      {selectedRepo.private ? <Lock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                      <button type="button" onClick={clearSelectedRepo} className="p-0.5 text-muted-foreground hover:text-foreground">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => { fetchGithubRepos(); setShowRepoPicker(!showRepoPicker) }}
-                        className="w-full flex items-center gap-2 px-3 py-2 bg-muted border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-                      >
-                        <Github className="w-4 h-4 shrink-0" />
-                        <span>Select from your GitHub repos</span>
-                      </button>
+        {/* Create workspace dialog */}
+        <Dialog open={showCreate} onOpenChange={setShowCreate}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create Workspace</DialogTitle>
+              <DialogDescription>Set up a new workspace for your team project.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={createWorkspace} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Name *</label>
+                <Input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Team Alpha Project" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Description</label>
+                <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  className="flex min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                  rows={2} placeholder="Capstone project, semester 2..." />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">GitHub Repository</label>
+                {selectedRepo ? (
+                  <div className="flex items-center gap-2 h-9 px-3 border border-input rounded-md bg-muted/50">
+                    <img src={selectedRepo.owner_avatar} alt="" className="size-4 rounded-full" />
+                    <span className="text-sm text-foreground flex-1 truncate">{selectedRepo.full_name}</span>
+                    {selectedRepo.private ? <Lock className="size-3.5 text-muted-foreground shrink-0" /> : <Globe className="size-3.5 text-muted-foreground shrink-0" />}
+                    <button type="button" onClick={clearSelectedRepo} className="p-0.5 text-muted-foreground hover:text-foreground">
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start gap-2 text-muted-foreground font-normal"
+                      onClick={() => { fetchGithubRepos(); setShowRepoPicker(!showRepoPicker) }}
+                    >
+                      <Github className="size-4 shrink-0" />
+                      Select from your GitHub repos
+                    </Button>
 
-                      {showRepoPicker && (
-                        <div className="absolute z-10 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-56 overflow-hidden">
-                          <div className="p-2 border-b border-border">
-                            <div className="relative">
-                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                              <input
-                                autoFocus
-                                type="text"
-                                value={repoSearch}
-                                onChange={(e) => setRepoSearch(e.target.value)}
-                                className="w-full pl-8 pr-3 py-1.5 bg-muted border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-ring text-foreground"
-                                placeholder="Search repositories..."
-                              />
-                            </div>
-                          </div>
-                          <div className="overflow-y-auto max-h-44">
-                            {reposLoading ? (
-                              <div className="flex items-center justify-center py-6 gap-2 text-sm text-muted-foreground">
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                Loading repos...
-                              </div>
-                            ) : filteredRepos.length === 0 ? (
-                              <div className="text-center py-6 text-sm text-muted-foreground">
-                                {reposFetched ? 'No repos found' : 'Click to load repos'}
-                              </div>
-                            ) : (
-                              filteredRepos.map((repo) => (
-                                <button
-                                  key={repo.id}
-                                  type="button"
-                                  onClick={() => selectRepo(repo)}
-                                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-left transition-colors"
-                                >
-                                  <img src={repo.owner_avatar} alt="" className="w-5 h-5 rounded-full shrink-0" />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="text-sm text-foreground truncate">{repo.full_name}</div>
-                                    {repo.description && <div className="text-xs text-muted-foreground truncate">{repo.description}</div>}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    {repo.language && <span className="text-xs text-muted-foreground">{repo.language}</span>}
-                                    {repo.private ? <Lock className="w-3 h-3 text-muted-foreground" /> : <Globe className="w-3 h-3 text-muted-foreground" />}
-                                  </div>
-                                </button>
-                              ))
-                            )}
+                    {showRepoPicker && (
+                      <div className="absolute z-10 mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-hidden">
+                        <div className="p-2 border-b border-border">
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                            <Input
+                              autoFocus
+                              value={repoSearch}
+                              onChange={(e) => setRepoSearch(e.target.value)}
+                              className="pl-8 h-8 text-sm"
+                              placeholder="Search repositories..."
+                            />
                           </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-1.5">Optional — you can also bind a repo later from workspace settings</p>
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button type="button" onClick={() => setShowCreate(false)} className="flex-1 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-                  <button type="submit" disabled={creating} className="flex-1 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
-                    {creating ? 'Creating...' : 'Create'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+                        <div className="overflow-y-auto max-h-44">
+                          {reposLoading ? (
+                            <div className="flex items-center justify-center py-6 gap-2 text-sm text-muted-foreground">
+                              <Loader2 className="size-4 animate-spin" />
+                              Loading repos...
+                            </div>
+                          ) : filteredRepos.length === 0 ? (
+                            <div className="text-center py-6 text-sm text-muted-foreground">
+                              {reposFetched ? 'No repos found' : 'Click to load repos'}
+                            </div>
+                          ) : (
+                            filteredRepos.map((repo) => (
+                              <button
+                                key={repo.id}
+                                type="button"
+                                onClick={() => selectRepo(repo)}
+                                className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent text-left transition-colors"
+                              >
+                                <img src={repo.owner_avatar} alt="" className="size-4 rounded-full shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm text-foreground truncate">{repo.full_name}</div>
+                                  {repo.description && <div className="text-xs text-muted-foreground truncate">{repo.description}</div>}
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {repo.language && <span className="text-xs text-muted-foreground">{repo.language}</span>}
+                                  {repo.private ? <Lock className="size-3 text-muted-foreground" /> : <Globe className="size-3 text-muted-foreground" />}
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">Optional — you can bind a repo later from settings</p>
+              </div>
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+                <Button type="submit" disabled={creating}>
+                  {creating ? 'Creating...' : 'Create'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   )

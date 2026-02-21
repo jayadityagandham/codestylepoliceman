@@ -1,17 +1,7 @@
-// AI provider integration — supports Groq (primary) and Gemini (fallback)
-// Set GROQ_API_KEY or GEMINI_API_KEY in .env.local
+// AI provider integration — Groq (llama-3.3-70b-versatile)
+// Set GROQ_API_KEY in .env.local
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-
-// ─── Provider detection ───────────────────────────────────────────
-type Provider = 'groq' | 'gemini'
-
-function getProvider(): Provider | null {
-  if (GROQ_API_KEY) return 'groq'
-  if (GEMINI_API_KEY) return 'gemini'
-  return null
-}
 
 // ─── Rate limit error ─────────────────────────────────────────────
 export class GeminiRateLimitError extends Error {
@@ -64,83 +54,15 @@ async function callGroq(prompt: string, systemInstruction?: string): Promise<str
   return data?.choices?.[0]?.message?.content ?? null
 }
 
-// ─── Gemini provider ──────────────────────────────────────────────
-const GEMINI_MODELS = ['gemini-2.0-flash-lite', 'gemini-2.0-flash']
-
-function geminiUrl(model: string) {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-}
-
-async function callGeminiProvider(prompt: string, systemInstruction?: string): Promise<string | null> {
-  const body: Record<string, unknown> = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.3, maxOutputTokens: 2048, topP: 0.8 },
-  }
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] }
-  }
-
-  for (let i = 0; i < GEMINI_MODELS.length; i++) {
-    const model = GEMINI_MODELS[i]
-    try {
-      const res = await fetch(`${geminiUrl(model)}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      if (res.status === 429) {
-        const errBody = await res.json().catch(() => ({}))
-        const retryDetail = errBody?.error?.details?.find((d: { '@type': string }) => d['@type']?.includes('RetryInfo'))
-        const retryDelay = retryDetail?.retryDelay ? parseInt(retryDetail.retryDelay) * 1000 : 30000
-        console.warn(`[Gemini] Rate limited on ${model}${i < GEMINI_MODELS.length - 1 ? `, trying ${GEMINI_MODELS[i + 1]}...` : ''}`)
-        if (i < GEMINI_MODELS.length - 1) continue
-        throw new GeminiRateLimitError(retryDelay)
-      }
-
-      if (!res.ok) {
-        const errText = await res.text()
-        console.error(`[Gemini] API error on ${model}:`, res.status, errText)
-        if (res.status >= 500 && i < GEMINI_MODELS.length - 1) continue
-        return null
-      }
-
-      const data = await res.json()
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null
-    } catch (err) {
-      if (err instanceof GeminiRateLimitError) throw err
-      console.error(`[Gemini] Request failed on ${model}:`, err)
-      if (i < GEMINI_MODELS.length - 1) continue
-      return null
-    }
-  }
-  return null
-}
-
-// ─── Unified AI call ──────────────────────────────────────────────
+// ─── Unified AI call (Groq only) ─────────────────────────────────
 export async function callGemini(prompt: string, systemInstruction?: string): Promise<string | null> {
-  const provider = getProvider()
-  if (!provider) {
-    console.warn('[AI] No API key set (GROQ_API_KEY or GEMINI_API_KEY), skipping AI')
+  if (!GROQ_API_KEY) {
+    console.warn('[AI] No GROQ_API_KEY set, skipping AI')
     return null
   }
 
-  console.log(`[AI] Using provider: ${provider}`)
-
-  if (provider === 'groq') {
-    try {
-      return await callGroq(prompt, systemInstruction)
-    } catch (err) {
-      // If Groq rate-limits and Gemini is available, try Gemini
-      if (err instanceof GeminiRateLimitError && GEMINI_API_KEY) {
-        console.warn('[AI] Groq rate limited, falling back to Gemini...')
-        return await callGeminiProvider(prompt, systemInstruction)
-      }
-      throw err
-    }
-  }
-
-  return await callGeminiProvider(prompt, systemInstruction)
+  console.log('[AI] Using provider: groq')
+  return await callGroq(prompt, systemInstruction)
 }
 
 // Classify message intent using Gemini
@@ -230,6 +152,122 @@ Keep each item concise (under 80 chars). Max 4 items per array. Be specific, not
     return JSON.parse(cleaned)
   } catch {
     console.error('[Gemini] Failed to parse analysis response:', result)
+    return null
+  }
+}
+
+// Generate todo items from a project description using AI
+export async function generateTodosFromDescription(projectDescription: string, existingTodos: string[]): Promise<Array<{
+  title: string
+  description: string
+  priority: 'low' | 'medium' | 'high' | 'critical'
+}> | null> {
+  const prompt = `You are a project management AI. Given a project description, generate a practical list of tasks (todos) to complete the project.
+
+PROJECT DESCRIPTION:
+${projectDescription}
+
+${existingTodos.length > 0 ? `EXISTING TASKS (do NOT duplicate these):\n${existingTodos.map(t => `- ${t}`).join('\n')}\n` : ''}
+Generate 5-10 specific, actionable tasks with clear titles. Each task should be a concrete unit of work.
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+[
+  { "title": "<concise task title, max 100 chars>", "description": "<1-2 sentence detail>", "priority": "<low|medium|high|critical>" },
+  ...
+]
+
+Order tasks by logical execution sequence. Assign priority based on:
+- critical: blocking or foundational work
+- high: core features
+- medium: important but not blocking
+- low: nice-to-have, polish, docs`
+
+  const result = await callGemini(prompt, 'You are a senior software engineer. Generate practical, specific tasks. Never be vague or generic. Each task should be independently completable.')
+  if (!result) return null
+
+  try {
+    const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const parsed = JSON.parse(cleaned)
+    if (!Array.isArray(parsed)) return null
+    return parsed.filter((t: { title?: string }) => t.title && typeof t.title === 'string').slice(0, 12)
+  } catch {
+    console.error('[AI] Failed to parse todo generation response:', result)
+    return null
+  }
+}
+
+// Summarize commits AND cross-reference with tasks to measure work completion
+export async function summarizeCommits(commits: Array<{
+  message: string
+  author_github_username: string | null
+  commit_type: string | null
+  committed_at: string
+  lines_added: number
+  lines_deleted: number
+}>, todos: Array<{
+  id: string
+  title: string
+  status: string
+  priority: string
+}>): Promise<{
+  summary: string
+  highlights: string[]
+  authorBreakdown: Record<string, string>
+  taskProgress: Array<{ taskId: string; taskTitle: string; status: 'addressed' | 'partially-addressed' | 'not-addressed'; evidence: string }>
+  completionPercent: number
+  workInsight: string
+} | null> {
+  const commitLines = commits.map((c, i) =>
+    `${i + 1}. [${c.commit_type ?? 'chore'}] ${c.author_github_username ?? 'unknown'}: ${c.message.split('\n')[0]} (+${c.lines_added}/-${c.lines_deleted})`
+  ).join('\n')
+
+  const taskLines = todos.map((t, i) =>
+    `${i + 1}. [${t.status}] (${t.priority}) "${t.title}" (id: ${t.id})`
+  ).join('\n')
+
+  const prompt = `You are a software engineering assistant. Analyze commits against the project's task list to determine work progress.
+
+COMMITS (${commits.length} total):
+${commitLines}
+
+TASKS (${todos.length} total):
+${taskLines || 'No tasks defined'}
+
+For each task, determine if recent commits address it by analyzing commit messages semantically — look for mentions of the same feature, component, or area of work. A task is:
+- "addressed": commits clearly implement or complete this task
+- "partially-addressed": commits show some progress toward this task  
+- "not-addressed": no commits relate to this task
+
+Calculate completionPercent as: (addressed * 100 + partially-addressed * 50) / total_tasks, rounded to nearest integer. If no tasks exist, estimate based on commit activity (0-100).
+
+Respond with ONLY valid JSON (no markdown, no code blocks):
+{
+  "summary": "<3-5 sentence executive summary of project activity and how it maps to planned work>",
+  "highlights": ["<notable change or pattern 1>", "<notable change 2>", ...],
+  "authorBreakdown": { "<author1>": "<1-line summary of their contributions>", ... },
+  "taskProgress": [
+    { "taskId": "<id from task list>", "taskTitle": "<task title>", "status": "addressed|partially-addressed|not-addressed", "evidence": "<which commit(s) relate, or 'no matching commits'>" },
+    ...
+  ],
+  "completionPercent": <0-100>,
+  "workInsight": "<1-2 sentence insight about alignment between commits and planned tasks — are devs working on planned work or doing unplanned work?>"
+}
+
+Keep highlights to max 5 items. Include ALL tasks in taskProgress. Be specific, reference actual commit messages.`
+
+  const result = await callGemini(prompt, 'You are a senior engineering manager analyzing whether development work aligns with planned tasks. Be precise about matching commits to tasks. Never fabricate evidence.')
+  if (!result) return null
+
+  try {
+    const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    const parsed = JSON.parse(cleaned)
+    // Ensure completionPercent is bounded
+    if (typeof parsed.completionPercent === 'number') {
+      parsed.completionPercent = Math.max(0, Math.min(100, Math.round(parsed.completionPercent)))
+    }
+    return parsed
+  } catch {
+    console.error('[AI] Failed to parse commit summary response:', result)
     return null
   }
 }

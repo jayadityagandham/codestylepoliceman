@@ -12,12 +12,27 @@ import {
   ChevronLeft, Search, Hash, Github, LogOut, Send, Trash2, UserMinus,
   Pencil, Mail, Calendar, Save, KeyRound, Brain, ListTodo, Target, Plus, CircleDot, Flame, Sparkles, Loader2
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Switch } from '@/components/ui/switch'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, AreaChart, Area
-} from 'recharts'
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import {
+  Chart as ChartJS,
+  CategoryScale, LinearScale, PointElement, LineElement, BarElement,
+  Filler, Tooltip as ChartTooltip, Legend, type ChartOptions,
+} from 'chart.js'
+import { Line as ChartLine, Bar as ChartBar } from 'react-chartjs-2'
 import { formatDistanceToNow } from 'date-fns'
 import { supabase } from '@/lib/supabase'
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, ChartTooltip, Legend)
 
 type Tab = 'overview' | 'commits' | 'prs' | 'issues' | 'alerts' | 'bus-factor' | 'team' | 'messages' | 'insights' | 'settings'
 
@@ -42,38 +57,41 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 function HealthGauge({ score }: { score: number }) {
-  const color = score >= 75 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444'
+  const color = score >= 75 ? '#a3a3a3' : score >= 50 ? '#737373' : '#525252'
+  const bgGlow = ''
   const label = score >= 75 ? 'Healthy' : score >= 50 ? 'At Risk' : 'Critical'
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative w-32 h-32">
-        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-          <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/30" />
-          <circle cx="50" cy="50" r="40" fill="none" stroke={color} strokeWidth="8"
+    <div className="flex flex-col items-center gap-3">
+      <div className={`relative size-32 rounded-full shadow-lg ${bgGlow}`}>
+        <svg viewBox="0 0 100 100" className="size-full -rotate-90">
+          <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="5" className="text-muted/15" />
+          <circle cx="50" cy="50" r="40" fill="none" stroke={color} strokeWidth="5"
             strokeDasharray={`${(score / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-1000" />
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center rotate-0">
-          <span className="text-2xl font-bold text-foreground">{score}</span>
-          <span className="text-xs text-muted-foreground">/100</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-3xl font-extrabold text-foreground tracking-tight">{score}</span>
+          <span className="text-[10px] text-muted-foreground font-medium">/100</span>
         </div>
       </div>
-      <span className="text-sm font-medium mt-1" style={{ color }}>{label}</span>
+      <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ color, backgroundColor: `${color}15` }}>{label}</span>
     </div>
   )
 }
 
-function StatCard({ icon: Icon, label, value, sub, color = 'text-primary' }: {
+function StatCard({ icon: Icon, label, value, sub }: {
   icon: React.ElementType; label: string; value: string | number; sub?: string; color?: string
 }) {
   return (
-    <div className="bg-card border border-border rounded-xl p-5">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{label}</span>
-        <Icon className={`w-4 h-4 ${color}`} />
-      </div>
-      <div className="text-2xl font-bold text-foreground">{value}</div>
-      {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
-    </div>
+    <Card className="py-0 border-border hover:border-foreground/20 transition-colors">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <Icon className="size-3.5 text-muted-foreground" />
+        </div>
+        <div className="text-xl font-bold text-foreground tracking-tight">{value}</div>
+        {sub && <div className="text-[10px] text-muted-foreground mt-0.5">{sub}</div>}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -373,7 +391,6 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [inviteLoading, setInviteLoading] = useState(false)
   const [collabRefreshing, setCollabRefreshing] = useState(false)
   const [unbindLoading, setUnbindLoading] = useState(false)
-  const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [collabInfo, setCollabInfo] = useState<{ external_contributors: { total: number; collaborators: number; external: string[] }; author_mapping: { mapped_count: number; unmapped_authors: string[] } } | null>(null)
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
   const [deletingMsgId, setDeletingMsgId] = useState<string | null>(null)
@@ -393,9 +410,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   const [newTodoDeadline, setNewTodoDeadline] = useState('')
   const [addingTodo, setAddingTodo] = useState(false)
   const [showAddTodo, setShowAddTodo] = useState(false)
+  const [aiProjectDesc, setAiProjectDesc] = useState('')
+  const [aiGenerating, setAiGenerating] = useState(false)
   const [aiAnalysis, setAiAnalysis] = useState<{ summary: string; risks: string[]; suggestions: string[]; teamDynamics: string; nextSteps: string[] } | null>(null)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [aiRetryCountdown, setAiRetryCountdown] = useState(0)
+  const [commitSummary, setCommitSummary] = useState<{ summary: string; highlights: string[]; authorBreakdown: Record<string, string>; taskProgress: Array<{ taskId: string; taskTitle: string; status: 'addressed' | 'partially-addressed' | 'not-addressed'; evidence: string }>; completionPercent: number; workInsight: string } | null>(null)
+  const [commitSummarizing, setCommitSummarizing] = useState(false)
 
   // Derive admin status from members data
   const isAdmin = data?.members?.some((m) => m.user?.id === user?.id && m.role === 'admin') ?? false
@@ -592,7 +613,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-3">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="size-6 border-2 border-foreground border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-sm text-muted-foreground">Loading workspace...</p>
         </div>
       </div>
@@ -603,9 +624,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-3">
-          <AlertTriangle className="w-8 h-8 text-destructive mx-auto" />
+          <AlertTriangle className="size-8 text-destructive mx-auto" />
           <p className="text-sm text-muted-foreground">{error}</p>
-          <button onClick={() => refetch()} className="text-sm text-primary hover:underline">Retry</button>
+          <Button variant="link" onClick={() => refetch()}>Retry</Button>
         </div>
       </div>
     )
@@ -622,89 +643,99 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.push('/dashboard')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-            <Shield className="w-5 h-5" />
-            <span className="text-sm font-medium hidden sm:block">CSP</span>
-          </button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-semibold text-foreground">{wsInfo?.name ?? '...'}</span>
-          {data?.overview && (
-            <span className={`text-xs px-2 py-0.5 rounded-full border ${
-              data.overview.healthScore >= 75 ? 'bg-emerald-400/10 text-emerald-400 border-emerald-400/30' :
-              data.overview.healthScore >= 50 ? 'bg-yellow-400/10 text-yellow-400 border-yellow-400/30' :
-              'bg-red-400/10 text-red-400 border-red-400/30'
-            }`}>
-              Health: {data.overview.healthScore}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={runHeuristics} disabled={heuristicsLoading} title="Run heuristic checks" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded disabled:opacity-50">
-            {heuristicsLoading ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Zap className="w-4 h-4" />}
-          </button>
-          <button onClick={refetch} disabled={loading} title="Refresh" className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <div className="relative">
-            <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="flex items-center gap-2 p-1 rounded-lg hover:bg-muted transition-colors">
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="w-6 h-6 rounded-full" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</div>
-              )}
+      <header className="border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <button onClick={() => router.push('/dashboard')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+              <Shield className="size-4 text-foreground" />
+              <span className="text-xs font-semibold hidden sm:block">CSP</span>
             </button>
-            {showAccountMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowAccountMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="p-3 border-b border-border">
-                    <p className="text-xs font-semibold text-foreground truncate">{user?.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{user?.email}</p>
-                  </div>
-                  <div className="p-1.5">
-                    <button onClick={() => { setShowAccountMenu(false); setTab('settings') }} className="w-full text-left px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors flex items-center gap-2">
-                      <Users className="w-3 h-3" /> Profile & Settings
-                    </button>
-                    <button onClick={() => { setShowAccountMenu(false); logout(); router.push('/') }} className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex items-center gap-2">
-                      <LogOut className="w-3 h-3" /> Sign out
-                    </button>
-                  </div>
-                </div>
-              </>
+            <ChevronRight className="size-3.5 text-muted-foreground/50" />
+            <span className="text-xs font-semibold text-foreground tracking-tight">{wsInfo?.name ?? '...'}</span>
+            {data?.overview && (
+              <Badge variant={data.overview.healthScore >= 75 ? 'secondary' : 'outline'} className={`text-[10px] ml-1 px-2 ${
+                data.overview.healthScore >= 75 ? 'text-foreground/70' :
+                data.overview.healthScore >= 50 ? 'text-foreground/60' :
+                'text-foreground/50'
+              }`}>
+                Health: {data.overview.healthScore}
+              </Badge>
             )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={runHeuristics} disabled={heuristicsLoading} className="rounded-lg hover:bg-muted transition-colors">
+                  {heuristicsLoading ? <div className="size-4 border-2 border-foreground border-t-transparent rounded-full animate-spin" /> : <Zap className="size-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Run heuristic checks</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={refetch} disabled={loading} className="rounded-lg hover:bg-muted transition-colors">
+                  <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Refresh data</TooltipContent>
+            </Tooltip>
+            <Separator orientation="vertical" className="h-5 mx-1.5" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 rounded-full hover:bg-muted/80 transition-all duration-200 outline-none">
+                  <Avatar className="size-7 ring-1 ring-border">
+                    {user?.avatar_url && <AvatarImage src={user.avatar_url} />}
+                    <AvatarFallback className="text-xs font-medium bg-muted text-foreground">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52 p-1.5">
+                <div className="px-2.5 py-2.5">
+                  <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                </div>
+                <Separator className="my-1" />
+                <DropdownMenuItem onClick={() => setTab('settings')} className="rounded-md">
+                  <Users className="size-3.5" /> Profile & Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={() => { logout(); router.push('/') }} className="rounded-md">
+                  <LogOut className="size-3.5" /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
 
       {/* Tabs */}
-      <div className="border-b border-border px-6">
-        <div className="flex gap-1 overflow-x-auto">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-3 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
-                tab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </button>
-          ))}
+      <div className="border-b border-border bg-background/80 backdrop-blur-md sticky top-14 z-30">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex justify-center gap-1 overflow-x-auto -mb-px">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  tab === id ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <main ref={dashboardRef} className="max-w-7xl mx-auto px-6 py-6">
+      <main ref={dashboardRef} className="max-w-7xl mx-auto px-6 py-8">
 
         {/* OVERVIEW TAB */}
         {tab === 'overview' && data && (
           <div className="space-y-6">
             {/* Live data badge */}
             {data.liveSource && (
-              <div className="flex items-center gap-2 text-xs text-emerald-400">
-                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+              <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                <span className="size-1.5 bg-emerald-500 rounded-full animate-pulse" />
                 Live data from GitHub
               </div>
             )}
@@ -712,23 +743,26 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
               <StatCard icon={GitCommit} label="Total Commits" value={data.overview.totalCommits} sub="all time" />
               <StatCard icon={GitPullRequest} label="Open PRs" value={data.overview.openPRs}
-                sub="awaiting review" color={data.overview.openPRs > 5 ? 'text-yellow-400' : 'text-primary'} />
+                sub="awaiting review" />
               <StatCard icon={AlertCircle} label="Open Issues" value={data.overview.openIssues}
-                sub="in backlog" color={data.overview.openIssues > 10 ? 'text-red-400' : 'text-primary'} />
+                sub="in backlog" />
               <StatCard icon={Clock} label="Avg Cycle Time" value={formatSeconds(data.overview.avgCycleTimeSeconds)}
-                sub="commit to merge" color="text-cyan-400" />
+                sub="commit to merge" />
               <StatCard icon={Activity} label="WIP Count" value={data.overview.totalWIP ?? 0}
-                sub="active PRs (updated <7d)" color={data.overview.totalWIP > 5 ? 'text-orange-400' : 'text-primary'} />
+                sub="active PRs (updated <7d)" />
             </div>
 
             {/* Health score + health history */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="bg-card border border-border rounded-xl p-6 flex flex-col items-center justify-center">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4">Team Health Score</p>
-                <HealthGauge score={data.overview.healthScore} />
-              </div>
-              <div className="lg:col-span-2 bg-card border border-border rounded-xl p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4">Health Score Breakdown</p>
+              <Card className="py-0 shadow-sm border-border/50 flex flex-col items-center justify-center">
+                <CardContent className="py-6">
+                  <p className="text-xs text-muted-foreground font-medium text-center mb-4">Team Health Score</p>
+                  <HealthGauge score={data.overview.healthScore} />
+                </CardContent>
+              </Card>
+              <Card className="lg:col-span-2 py-0 shadow-sm border-border/50">
+                <CardContent className="py-5">
+                  <p className="text-xs text-muted-foreground font-medium mb-4">Health Score Breakdown</p>
                 {data.overview.healthBreakdown ? (
                   <div className="space-y-3">
                     {Object.entries(data.overview.healthBreakdown as Record<string, { score: number; weight: number; detail: string }>).map(([key, v]) => {
@@ -755,30 +789,45 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     })}
                   </div>
                 ) : data.healthHistory.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={120}>
-                    <LineChart data={[...data.healthHistory].reverse()}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border/50" />
-                      <XAxis dataKey="snapshot_at" hide />
-                      <YAxis domain={[0, 100]} hide />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
-                        formatter={(v: number) => [`${v}`, 'Health']}
-                        labelFormatter={(l) => new Date(l).toLocaleString()}
-                      />
-                      <Line type="monotone" dataKey="score" stroke="#22c55e" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div className="h-[120px]">
+                    <ChartLine
+                      data={{
+                        labels: [...data.healthHistory].reverse().map((h) => new Date(h.snapshot_at).toLocaleDateString()),
+                        datasets: [{
+                          label: 'Health',
+                          data: [...data.healthHistory].reverse().map((h) => h.score),
+                          borderColor: '#a3a3a3',
+                          backgroundColor: 'rgba(163,163,163,0.1)',
+                          fill: true,
+                          tension: 0.4,
+                          pointRadius: 0,
+                          borderWidth: 2,
+                        }],
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                          x: { display: false },
+                          y: { display: false, min: 0, max: 100 },
+                        },
+                      }}
+                    />
+                  </div>
                 ) : (
                   <div className="h-30 flex items-center justify-center text-xs text-muted-foreground">No data yet. Bind a GitHub repo to see health breakdown.</div>
                 )}
-              </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Contributor activity + Recent alerts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-card border border-border rounded-xl p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" /> Contributor Activity
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="p-5">
+                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
+                  <Users className="size-3.5" /> Contributor Activity
                 </p>
                 {data.contributors.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-8">No commits yet. Connect your GitHub repo and add a webhook.</p>
@@ -799,22 +848,24 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                             <span className="text-xs text-muted-foreground shrink-0 ml-2">{c.commits} commits</span>
                           </div>
                           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${Math.min(100, (c.commits / Math.max(1, data.contributors[0].commits)) * 100)}%` }} />
+                            <div className="h-full bg-foreground/60 rounded-full transition-all" style={{ width: `${Math.min(100, (c.commits / Math.max(1, data.contributors[0].commits)) * 100)}%` }} />
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+                </CardContent>
+              </Card>
 
-              <div className="bg-card border border-border rounded-xl p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <Bell className="w-3.5 h-3.5" /> Active Alerts
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="p-5">
+                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
+                  <Bell className="size-3.5" /> Active Alerts
                 </p>
                 {data.alerts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 gap-2">
-                    <CheckCircle className="w-6 h-6 text-emerald-400" />
+                    <CheckCircle className="w-6 h-6 text-muted-foreground" />
                     <p className="text-xs text-muted-foreground">All clear! No active alerts.</p>
                   </div>
                 ) : (
@@ -833,20 +884,22 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       )
                     })}
                     {data.alerts.length > 4 && (
-                      <button onClick={() => setTab('alerts')} className="text-xs text-primary hover:underline">
+                      <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={() => setTab('alerts')}>
                         View all {data.alerts.length} alerts
-                      </button>
+                      </Button>
                     )}
                   </div>
                 )}
-              </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Contributor Health */}
             {data.contributorHealth && data.contributorHealth.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" /> Contributor Health
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="p-5">
+                <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
+                  <Activity className="size-3.5" /> Contributor Health
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {data.contributorHealth.map((h) => {
@@ -877,38 +930,59 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     )
                   })}
                 </div>
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Commit type breakdown */}
             {data.recentCommits.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5">
                 <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
                   <BarChart2 className="w-3.5 h-3.5" /> Commit Type Breakdown
                 </p>
                 {(() => {
                   const typeCounts: Record<string, number> = {}
                   data.recentCommits.forEach((c) => { typeCounts[c.commit_type ?? 'chore'] = (typeCounts[c.commit_type ?? 'chore'] || 0) + 1 })
-                  const chartData = Object.entries(typeCounts).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count)
+                  const sorted = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])
+                  const barColors = ['#404040','#525252','#666666','#737373','#808080','#8c8c8c','#999999','#a6a6a6','#b3b3b3']
                   return (
-                    <ResponsiveContainer width="100%" height={140}>
-                      <BarChart data={chartData} barSize={28}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border/30" vertical={false} />
-                        <XAxis dataKey="type" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                        <YAxis hide />
-                        <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                        <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className="h-[140px]">
+                      <ChartBar
+                        data={{
+                          labels: sorted.map(([t]) => t),
+                          datasets: [{
+                            label: 'Commits',
+                            data: sorted.map(([, c]) => c),
+                            backgroundColor: sorted.map((_, i) => barColors[i % barColors.length] + '99'),
+                            borderColor: sorted.map((_, i) => barColors[i % barColors.length]),
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            maxBarThickness: 28,
+                          }],
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          plugins: { legend: { display: false } },
+                          scales: {
+                            x: { grid: { display: false }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 11 } } },
+                            y: { display: false },
+                          },
+                        }}
+                      />
+                    </div>
                   )
                 })()}
-              </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* Lifecycle Timeline */}
-            <div className="bg-card border border-border rounded-xl p-5">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
-                <TrendingUp className="w-3.5 h-3.5" /> Lifecycle Timeline (Recent PRs)
+            <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5">
+              <p className="text-xs text-muted-foreground font-medium mb-4 flex items-center gap-1.5">
+                <TrendingUp className="size-3.5" /> Lifecycle Timeline (Recent PRs)
               </p>
               {data.pullRequests.length === 0 ? (
                 <p className="text-xs text-muted-foreground text-center py-6">No pull requests tracked yet.</p>
@@ -938,52 +1012,66 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </div>
                 </div>
               )}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Cycle Time Trend */}
             {data.cycleTimeTrend && data.cycleTimeTrend.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5">
                 <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" /> Cycle Time Trend (hours)
                 </p>
                 {(() => {
-                  const chartData = [...data.cycleTimeTrend].reverse().map((m, i) => ({
+                  const trendData = [...data.cycleTimeTrend].reverse().map((m, i) => ({
                     label: `PR ${i + 1}`,
                     coding: m.codingTime ? Math.round(m.codingTime / 3600) : 0,
                     pickup: m.pickupTime ? Math.round(m.pickupTime / 3600) : 0,
                     review: m.reviewTime ? Math.round(m.reviewTime / 3600) : 0,
                     deploy: m.deploymentTime ? Math.round(m.deploymentTime / 3600) : 0,
-                    total: m.totalCycleTime ? Math.round(m.totalCycleTime / 3600) : 0,
                   }))
                   return (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <AreaChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border/30" />
-                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                        <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                        <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                        <Area type="monotone" dataKey="coding" stackId="1" stroke="#22c55e" fill="#22c55e33" name="Coding" />
-                        <Area type="monotone" dataKey="pickup" stackId="1" stroke="#eab308" fill="#eab30833" name="Pickup" />
-                        <Area type="monotone" dataKey="review" stackId="1" stroke="#3b82f6" fill="#3b82f633" name="Review" />
-                        <Area type="monotone" dataKey="deploy" stackId="1" stroke="#a855f7" fill="#a855f733" name="Deploy" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    <div className="h-[180px]">
+                      <ChartLine
+                        data={{
+                          labels: trendData.map((d) => d.label),
+                          datasets: [
+                            { label: 'Coding', data: trendData.map((d) => d.coding), borderColor: '#404040', backgroundColor: 'rgba(64,64,64,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
+                            { label: 'Pickup', data: trendData.map((d) => d.pickup), borderColor: '#737373', backgroundColor: 'rgba(115,115,115,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
+                            { label: 'Review', data: trendData.map((d) => d.review), borderColor: '#a3a3a3', backgroundColor: 'rgba(163,163,163,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
+                            { label: 'Deploy', data: trendData.map((d) => d.deploy), borderColor: '#d4d4d4', backgroundColor: 'rgba(212,212,212,0.15)', fill: true, tension: 0.4, pointRadius: 2 },
+                          ],
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          interaction: { mode: 'index' as const, intersect: false },
+                          plugins: { legend: { display: true, position: 'bottom' as const, labels: { boxWidth: 8, usePointStyle: true, pointStyle: 'circle', padding: 16, color: 'hsl(var(--muted-foreground))', font: { size: 10 } } } },
+                          scales: {
+                            x: { grid: { display: false }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
+                            y: { grid: { color: 'hsl(var(--border))' }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
+                          },
+                        }}
+                      />
+                    </div>
                   )
                 })()}
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* WIP per User */}
             {data.wipPerUser && data.wipPerUser.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5">
                 <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
                   <Activity className="w-3.5 h-3.5" /> WIP per Contributor
                 </p>
                 <div className="space-y-2">
                   {data.wipPerUser.map((w) => (
                     <div key={w.username} className="flex items-center gap-3">
-                      <div className="w-6 h-6 bg-orange-500/20 rounded-full flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-orange-400">{w.username.charAt(0).toUpperCase()}</span>
+                      <div className="w-6 h-6 bg-muted rounded-full flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-muted-foreground">{w.username.charAt(0).toUpperCase()}</span>
                       </div>
                       <span className="text-xs font-medium text-foreground w-32 truncate">{w.username}</span>
                       <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
@@ -994,20 +1082,139 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   ))}
                 </div>
-              </div>
+              </CardContent>
+              </Card>
             )}
           </div>
         )}
 
         {/* COMMITS TAB */}
         {tab === 'commits' && data && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+            <CardContent className="p-0">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Recent Commits</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">{data.recentCommits.length} commits ingested via GitHub webhook</p>
               </div>
+              {data.recentCommits.length > 0 && (
+                <button
+                  onClick={async () => {
+                    if (commitSummarizing || !token) return
+                    setCommitSummarizing(true)
+                    setCommitSummary(null)
+                    try {
+                      const res = await fetch(`/api/workspaces/${workspaceId}/commits/summarize`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                      })
+                      const d = await res.json()
+                      if (res.ok) {
+                        setCommitSummary(d)
+                      } else {
+                        toast.error(d.error || 'Failed to summarize commits')
+                      }
+                    } catch { toast.error('Commit summarization failed') }
+                    finally { setCommitSummarizing(false) }
+                  }}
+                  disabled={commitSummarizing}
+                  className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {commitSummarizing ? (
+                    <><div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Summarizing...</>
+                  ) : (
+                    <><Sparkles className="size-3" /> Analyze Progress</>
+                  )}
+                </button>
+              )}
             </div>
+
+            {/* AI Commit + Task Progress Analysis */}
+            {commitSummary && (
+              <div className="px-5 py-4 border-b border-border bg-muted/20 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Brain className="size-4 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-foreground">AI Progress Analysis</span>
+                  </div>
+                  <button onClick={() => setCommitSummary(null)} className="text-muted-foreground hover:text-foreground">
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+
+                {/* Completion percentage */}
+                <div className="bg-background rounded-lg border border-border p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-foreground">Work Completion</span>
+                    <span className="text-lg font-bold text-foreground">{commitSummary.completionPercent}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 bg-foreground"
+                      style={{ width: `${commitSummary.completionPercent}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1.5">{commitSummary.workInsight}</p>
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">{commitSummary.summary}</p>
+
+                {/* Task progress mapping */}
+                {commitSummary.taskProgress.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Task Progress from Commits</span>
+                    <div className="mt-2 space-y-1.5">
+                      {commitSummary.taskProgress.map((tp, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span className={`mt-0.5 shrink-0 size-2 rounded-full ${
+                            tp.status === 'addressed' ? 'bg-foreground' :
+                            tp.status === 'partially-addressed' ? 'bg-muted-foreground' : 'bg-muted'
+                          }`} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-foreground truncate">{tp.taskTitle}</span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                                tp.status === 'addressed' ? 'bg-foreground/10 text-foreground' :
+                                tp.status === 'partially-addressed' ? 'bg-muted-foreground/20 text-muted-foreground' :
+                                'bg-muted text-muted-foreground'
+                              }`}>
+                                {tp.status === 'addressed' ? 'Done' : tp.status === 'partially-addressed' ? 'In Progress' : 'Not Started'}
+                              </span>
+                            </div>
+                            <p className="text-muted-foreground mt-0.5 truncate">{tp.evidence}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {commitSummary.highlights.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Highlights</span>
+                    <ul className="mt-1 space-y-0.5">
+                      {commitSummary.highlights.map((h, i) => (
+                        <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                          <span className="text-foreground mt-0.5">•</span> {h}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Object.keys(commitSummary.authorBreakdown).length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">By Author</span>
+                    <div className="mt-1 space-y-0.5">
+                      {Object.entries(commitSummary.authorBreakdown).map(([author, desc]) => (
+                        <div key={author} className="text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">{author}:</span> {desc}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {data.recentCommits.length === 0 ? (
               <div className="py-16 text-center">
                 <GitCommit className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
@@ -1025,11 +1232,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           {c.author_avatar ? (
-                            <img src={c.author_avatar} alt="" className="w-5 h-5 rounded-full shrink-0" />
+                            <Avatar className="size-5">
+                              <AvatarImage src={c.author_avatar} />
+                              <AvatarFallback className="text-[9px]">{(c.author_github_username ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
+                            </Avatar>
                           ) : (
-                            <div className="w-5 h-5 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
-                              <span className="text-[9px] font-bold text-primary">{(c.author_github_username ?? '?').charAt(0).toUpperCase()}</span>
-                            </div>
+                            <Avatar className="size-5">
+                              <AvatarFallback className="text-[9px] bg-primary/20 text-primary">{(c.author_github_username ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
+                            </Avatar>
                           )}
                           <span className="text-xs font-medium text-foreground">{c.author_github_username ?? 'unknown'}</span>
                         </div>
@@ -1055,22 +1265,26 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       {commitsPage * PAGE_SIZE + 1}-{Math.min((commitsPage + 1) * PAGE_SIZE, data.recentCommits.length)} of {data.recentCommits.length}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setCommitsPage(Math.max(0, commitsPage - 1))} disabled={commitsPage === 0}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setCommitsPage(Math.min(Math.ceil(data.recentCommits.length / PAGE_SIZE) - 1, commitsPage + 1))}
-                        disabled={(commitsPage + 1) * PAGE_SIZE >= data.recentCommits.length}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setCommitsPage(Math.max(0, commitsPage - 1))} disabled={commitsPage === 0}>
+                        <ChevronLeft className="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setCommitsPage(Math.min(Math.ceil(data.recentCommits.length / PAGE_SIZE) - 1, commitsPage + 1))}
+                        disabled={(commitsPage + 1) * PAGE_SIZE >= data.recentCommits.length}>
+                        <ChevronRight className="size-4" />
+                      </Button>
                     </div>
                   </div>
                 )}
               </>
             )}
-          </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* PRs TAB */}
         {tab === 'prs' && data && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+            <CardContent className="p-0">
             <div className="px-5 py-4 border-b border-border">
               <h2 className="text-sm font-semibold text-foreground">Pull Requests ({data.pullRequests.length})</h2>
             </div>
@@ -1089,9 +1303,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${pr.state === 'open' ? 'bg-emerald-400/20 text-emerald-400' : pr.merged_at ? 'bg-purple-400/20 text-purple-400' : 'bg-zinc-400/20 text-zinc-400'}`}>
+                              <Badge variant={pr.merged_at ? 'secondary' : pr.state === 'open' ? 'default' : 'outline'} className={`text-[10px] ${pr.merged_at ? 'bg-purple-400/20 text-purple-400 hover:bg-purple-400/20' : pr.state === 'open' ? 'bg-emerald-400/20 text-emerald-400 hover:bg-emerald-400/20' : ''}`}>
                                 {pr.merged_at ? 'merged' : pr.state}
-                              </span>
+                              </Badge>
                               <span className="text-xs text-muted-foreground">#{pr.github_pr_number}</span>
                             </div>
                             <p className="text-sm font-medium text-foreground truncate">{pr.title}</p>
@@ -1099,12 +1313,12 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                               by {pr.author_github_username} · {formatDistanceToNow(new Date(pr.opened_at), { addSuffix: true })}
                             </p>
                             {cycleInfo && (
-                              <div className="flex items-center gap-3 mt-2">
-                                {cycleInfo.codingTime != null && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">Coding {formatSeconds(cycleInfo.codingTime)}</span>}
-                                {cycleInfo.pickupTime != null && <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400">Pickup {formatSeconds(cycleInfo.pickupTime)}</span>}
-                                {cycleInfo.reviewTime != null && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">Review {formatSeconds(cycleInfo.reviewTime)}</span>}
-                                {cycleInfo.deploymentTime != null && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Deploy {formatSeconds(cycleInfo.deploymentTime)}</span>}
-                                {cycleInfo.totalCycleTime != null && <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300">Total {formatSeconds(cycleInfo.totalCycleTime)}</span>}
+                              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                {cycleInfo.codingTime != null && <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">Coding {formatSeconds(cycleInfo.codingTime)}</Badge>}
+                                {cycleInfo.pickupTime != null && <Badge variant="outline" className="text-[10px] bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/10">Pickup {formatSeconds(cycleInfo.pickupTime)}</Badge>}
+                                {cycleInfo.reviewTime != null && <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/10">Review {formatSeconds(cycleInfo.reviewTime)}</Badge>}
+                                {cycleInfo.deploymentTime != null && <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/10">Deploy {formatSeconds(cycleInfo.deploymentTime)}</Badge>}
+                                {cycleInfo.totalCycleTime != null && <Badge variant="outline" className="text-[10px] bg-zinc-500/10 text-zinc-300 border-zinc-500/20 hover:bg-zinc-500/10">Total {formatSeconds(cycleInfo.totalCycleTime)}</Badge>}
                               </div>
                             )}
                           </div>
@@ -1123,22 +1337,26 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       {prsPage * PAGE_SIZE + 1}-{Math.min((prsPage + 1) * PAGE_SIZE, data.pullRequests.length)} of {data.pullRequests.length}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setPrsPage(Math.max(0, prsPage - 1))} disabled={prsPage === 0}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setPrsPage(Math.min(Math.ceil(data.pullRequests.length / PAGE_SIZE) - 1, prsPage + 1))}
-                        disabled={(prsPage + 1) * PAGE_SIZE >= data.pullRequests.length}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setPrsPage(Math.max(0, prsPage - 1))} disabled={prsPage === 0}>
+                        <ChevronLeft className="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setPrsPage(Math.min(Math.ceil(data.pullRequests.length / PAGE_SIZE) - 1, prsPage + 1))}
+                        disabled={(prsPage + 1) * PAGE_SIZE >= data.pullRequests.length}>
+                        <ChevronRight className="size-4" />
+                      </Button>
                     </div>
                   </div>
                 )}
               </>
             )}
-          </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* ISSUES TAB */}
         {tab === 'issues' && data && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+            <CardContent className="p-0">
             <div className="px-5 py-4 border-b border-border">
               <h2 className="text-sm font-semibold text-foreground">Issues ({data.issues.length})</h2>
             </div>
@@ -1155,9 +1373,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${issue.state === 'open' ? 'bg-red-400/20 text-red-400' : 'bg-zinc-400/20 text-zinc-400'}`}>
+                            <Badge variant="outline" className={`text-[10px] ${issue.state === 'open' ? 'bg-red-400/20 text-red-400 border-red-400/30 hover:bg-red-400/20' : 'bg-zinc-400/20 text-zinc-400 border-zinc-400/30 hover:bg-zinc-400/20'}`}>
                               {issue.state}
-                            </span>
+                            </Badge>
                             <span className="text-xs text-muted-foreground">#{issue.github_issue_number}</span>
                           </div>
                           <p className="text-sm font-medium text-foreground truncate">{issue.title}</p>
@@ -1178,17 +1396,20 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       {issuesPage * PAGE_SIZE + 1}-{Math.min((issuesPage + 1) * PAGE_SIZE, data.issues.length)} of {data.issues.length}
                     </span>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setIssuesPage(Math.max(0, issuesPage - 1))} disabled={issuesPage === 0}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setIssuesPage(Math.min(Math.ceil(data.issues.length / PAGE_SIZE) - 1, issuesPage + 1))}
-                        disabled={(issuesPage + 1) * PAGE_SIZE >= data.issues.length}
-                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setIssuesPage(Math.max(0, issuesPage - 1))} disabled={issuesPage === 0}>
+                        <ChevronLeft className="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => setIssuesPage(Math.min(Math.ceil(data.issues.length / PAGE_SIZE) - 1, issuesPage + 1))}
+                        disabled={(issuesPage + 1) * PAGE_SIZE >= data.issues.length}>
+                        <ChevronRight className="size-4" />
+                      </Button>
                     </div>
                   </div>
                 )}
               </>
             )}
-          </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* ALERTS TAB */}
@@ -1196,17 +1417,19 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-foreground">{data.alerts.length} Active Alert{data.alerts.length !== 1 ? 's' : ''}</h2>
-              <button onClick={runHeuristics} disabled={heuristicsLoading} className="flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50">
+              <Button variant="ghost" size="sm" onClick={runHeuristics} disabled={heuristicsLoading} className="text-xs gap-1.5">
                 {heuristicsLoading ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Zap className="w-3 h-3" />}
                 {heuristicsLoading ? 'Scanning...' : 'Run checks now'}
-              </button>
+              </Button>
             </div>
             {data.alerts.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl py-16 text-center">
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="py-16 text-center">
                 <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
                 <p className="text-sm text-foreground font-medium">All clear!</p>
                 <p className="text-xs text-muted-foreground mt-1">No active alerts. Team is on track.</p>
-              </div>
+                </CardContent>
+              </Card>
             ) : (
               data.alerts.map((alert) => {
                 const cfg = SEVERITY_CONFIG[alert.severity as keyof typeof SEVERITY_CONFIG] ?? SEVERITY_CONFIG.info
@@ -1244,35 +1467,44 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
             {/* Codebase bus factor summary */}
             {(data.codebaseBusFactor !== undefined || data.contributors.length > 0) && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                <Card className="py-0 shadow-sm border-border/50">
+                  <CardContent className="p-5 text-center">
                   <p className={`text-3xl font-bold ${(data.codebaseBusFactor ?? 0) <= 1 ? 'text-red-400' : (data.codebaseBusFactor ?? 0) <= 2 ? 'text-yellow-400' : 'text-emerald-400'}`}>
                     {data.codebaseBusFactor ?? '—'}
                   </p>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Codebase Bus Factor</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Contributors needed to cover 50% of commits</p>
-                </div>
-                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                  </CardContent>
+                </Card>
+                <Card className="py-0 shadow-sm border-border/50">
+                  <CardContent className="p-5 text-center">
                   <p className="text-3xl font-bold text-foreground">{data.contributors.length}</p>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Total Contributors</p>
-                </div>
-                <div className="bg-card border border-border rounded-xl p-5 text-center">
+                  </CardContent>
+                </Card>
+                <Card className="py-0 shadow-sm border-border/50">
+                  <CardContent className="p-5 text-center">
                   <p className="text-3xl font-bold text-foreground">{data.criticalFiles.length}</p>
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">
                     {data.criticalFiles.some(f => f.file.startsWith('@')) ? 'High-Concentration Contributors' : 'At-Risk Files'}
                   </p>
-                </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
 
             {data.criticalFiles.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl py-16 text-center">
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="py-16 text-center">
                 <BookOpen className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No concentration risks detected</p>
                 <p className="text-xs text-muted-foreground mt-1">Knowledge appears well-distributed, or bind a GitHub repo to see analysis.</p>
-              </div>
+                </CardContent>
+              </Card>
             ) : data.criticalFiles.some(f => f.file.startsWith('@')) ? (
               /* Contributor-level bus factor (live fallback) */
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+                <CardContent className="p-0">
                 <div className="px-5 py-3.5 border-b border-border grid grid-cols-12 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                   <span className="col-span-5">Contributor</span>
                   <span className="col-span-4">Commit Share</span>
@@ -1313,10 +1545,12 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   ))}
                 </div>
-              </div>
+                </CardContent>
+              </Card>
             ) : (
               /* Per-file bus factor (from file_authorship) */
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+                <CardContent className="p-0">
                 <div className="px-5 py-3.5 border-b border-border grid grid-cols-4 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                   <span className="col-span-2">File</span>
                   <span>Dominant Author</span>
@@ -1344,12 +1578,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   ))}
                 </div>
-              </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* Force-directed dependency graph */}
             {data.criticalFiles.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5">
                 <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4 flex items-center gap-1.5">
                   <GitBranch className="w-3.5 h-3.5" /> Dependency Risk Map (Force Graph)
                 </p>
@@ -1377,7 +1613,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   )
                 })()}
-              </div>
+              </CardContent>
+              </Card>
             )}
           </div>
         )}
@@ -1389,18 +1626,19 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               <h2 className="text-sm font-semibold text-foreground">Team Messages ({realtimeMessages.length}){realtimeMessages.length > 0 && <span className="ml-1.5 inline-block w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" title="Live" />}</h2>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <input
+                <Input
                   type="text"
                   value={msgSearch}
                   onChange={(e) => setMsgSearch(e.target.value)}
                   placeholder="Search messages..."
-                  className="pl-8 pr-3 py-1.5 text-xs bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-64"
+                  className="pl-8 text-xs w-64"
                 />
               </div>
             </div>
 
             {/* Compose bar */}
-            <div className="bg-card border border-border rounded-xl p-3">
+            <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-3">
               <form onSubmit={async (e) => {
                 e.preventDefault()
                 if (!msgInput.trim() || sendingMsg || !token) return
@@ -1473,25 +1711,30 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   style={{ height: 'auto', overflow: 'hidden' }}
                   onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px' }}
                 />
-                <button
+                <Button
                   type="submit"
+                  size="sm"
                   disabled={sendingMsg || !msgInput.trim()}
-                  className="px-3 py-2 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                  className="shrink-0 gap-1.5"
                 >
                   {sendingMsg ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Send className="w-3 h-3" />}
                   Send
-                </button>
+                </Button>
               </form>
-            </div>
+              </CardContent>
+            </Card>
 
             {realtimeMessages.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl py-12 text-center">
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="py-12 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No messages yet.</p>
                 <p className="text-xs text-muted-foreground mt-1">Send the first message to your team above!</p>
-              </div>
+                </CardContent>
+              </Card>
             ) : (
-              <div className="bg-card border border-border rounded-xl overflow-hidden divide-y divide-border">
+              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+                <CardContent className="p-0 divide-y divide-border">
                 {realtimeMessages
                   .filter((m) => {
                     if (!msgSearch) return true
@@ -1570,7 +1813,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       </div>
                     )
                   })}
-              </div>
+                </CardContent>
+              </Card>
             )}
           </div>
         )}
@@ -1584,51 +1828,71 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
             </div>
 
             {(!data.teamStats || data.teamStats.length === 0) ? (
-              <div className="bg-card border border-border rounded-xl p-12 text-center">
+              <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="p-12 text-center">
                 <Users className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">No contributor data yet</p>
                 <p className="text-xs text-muted-foreground mt-1">Bind a GitHub repo and data will appear here</p>
-              </div>
+                </CardContent>
+              </Card>
             ) : (
               <>
                 {/* Summary bar */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-4 text-center">
                     <p className="text-2xl font-bold text-foreground">{data.teamStats.length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Contributors</p>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-4 text-center">
                     <p className="text-2xl font-bold text-emerald-400">{data.teamStats.filter(t => t.status === 'active').length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Active (&lt;48h)</p>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-4 text-center">
                     <p className="text-2xl font-bold text-yellow-400">{data.teamStats.filter(t => t.status === 'moderate').length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Moderate (48h–7d)</p>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-4 text-center">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-4 text-center">
                     <p className="text-2xl font-bold text-red-400">{data.teamStats.filter(t => t.status === 'inactive').length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">Inactive (&gt;7d)</p>
-                  </div>
+                    </CardContent>
+                  </Card>
                 </div>
 
                 {/* Commit distribution chart */}
                 {data.teamStats.length > 0 && (
-                  <div className="bg-card border border-border rounded-xl p-5">
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-5">
                     <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-4">Commit Distribution</p>
-                    <ResponsiveContainer width="100%" height={Math.max(180, data.teamStats.length * 36)}>
-                      <BarChart data={data.teamStats.slice(0, 15)} layout="vertical" margin={{ left: 10, right: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border/30" />
-                        <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
-                        <YAxis type="category" dataKey="username" width={100} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
-                          formatter={(v: number, name: string) => [v, name === 'commits' ? 'Commits' : name === 'prsOpened' ? 'PRs' : name]}
-                        />
-                        <Bar dataKey="commits" fill="#6366f1" radius={[0, 4, 4, 0]} name="Commits" />
-                        <Bar dataKey="prsOpened" fill="#22c55e" radius={[0, 4, 4, 0]} name="PRs Opened" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                    <div style={{ height: Math.max(180, data.teamStats.slice(0, 15).length * 36) }}>
+                      <ChartBar
+                        data={{
+                          labels: data.teamStats.slice(0, 15).map((t) => t.username),
+                          datasets: [
+                            { label: 'Commits', data: data.teamStats.slice(0, 15).map((t) => t.commits), backgroundColor: 'rgba(64,64,64,0.7)', borderColor: '#404040', borderWidth: 1, borderRadius: 4 },
+                            { label: 'PRs Opened', data: data.teamStats.slice(0, 15).map((t) => t.prsOpened), backgroundColor: 'rgba(163,163,163,0.7)', borderColor: '#a3a3a3', borderWidth: 1, borderRadius: 4 },
+                          ],
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          indexAxis: 'y' as const,
+                          plugins: { legend: { display: true, position: 'bottom' as const, labels: { boxWidth: 8, usePointStyle: true, pointStyle: 'circle', padding: 16, color: 'hsl(var(--muted-foreground))', font: { size: 10 } } } },
+                          scales: {
+                            x: { grid: { color: 'hsl(var(--border))' }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
+                            y: { grid: { display: false }, ticks: { color: 'hsl(var(--muted-foreground))', font: { size: 10 } } },
+                          },
+                        }}
+                      />
+                    </div>
+                    </CardContent>
+                  </Card>
                 )}
 
                 {/* Contributor cards */}
@@ -1641,17 +1905,15 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     }
                     const totalLines = member.linesAdded + member.linesDeleted
                     return (
-                      <div key={member.username} className="bg-card border border-border rounded-xl p-5 space-y-4">
+                      <Card key={member.username} className="py-0 shadow-sm border-border/50">
+                        <CardContent className="p-5 space-y-4">
                         {/* Header */}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
-                            {member.avatar_url ? (
-                              <img src={member.avatar_url} alt="" className="w-9 h-9 rounded-full" />
-                            ) : (
-                              <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-sm font-bold text-primary">
-                                {member.username[0]?.toUpperCase()}
-                              </div>
-                            )}
+                            <Avatar className="size-9">
+                              {member.avatar_url && <AvatarImage src={member.avatar_url} />}
+                              <AvatarFallback className="text-sm">{member.username[0]?.toUpperCase()}</AvatarFallback>
+                            </Avatar>
                             <div>
                               <p className="text-sm font-semibold text-foreground">{member.username}</p>
                               {member.lastActive && (
@@ -1661,9 +1923,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                               )}
                             </div>
                           </div>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${statusColors[member.status] ?? statusColors.inactive}`}>
+                          <Badge variant="outline" className={`text-[10px] ${statusColors[member.status] ?? statusColors.inactive}`}>
                             {member.status}
-                          </span>
+                          </Badge>
                         </div>
 
                         {/* Stats grid */}
@@ -1723,7 +1985,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                             </span>
                           )}
                         </div>
-                      </div>
+                        </CardContent>
+                      </Card>
                     )
                   })}
                 </div>
@@ -1734,7 +1997,7 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
         {/* AI INSIGHTS TAB */}
         {tab === 'insights' && (
-          <div className="max-w-4xl space-y-6">
+          <div className="max-w-4xl mx-auto space-y-6">
             {/* Project Progress */}
             {(() => {
               const total = todos.length
@@ -1745,57 +2008,66 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               const overdue = todos.filter((t) => t.deadline && new Date(t.deadline) < new Date() && t.status !== 'completed').length
               return (
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-card border border-border rounded-xl p-5 flex flex-col items-center">
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-5 flex flex-col items-center">
                     <div className="relative w-20 h-20 mb-2">
                       <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                         <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="8" className="text-muted/30" />
-                        <circle cx="50" cy="50" r="40" fill="none" stroke={pct >= 75 ? '#22c55e' : pct >= 40 ? '#eab308' : '#8b5cf6'} strokeWidth="8" strokeDasharray={`${(pct / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-700" />
+                        <circle cx="50" cy="50" r="40" fill="none" stroke={pct >= 75 ? '#a3a3a3' : pct >= 40 ? '#737373' : '#525252'} strokeWidth="8" strokeDasharray={`${(pct / 100) * 251.2} 251.2`} strokeLinecap="round" className="transition-all duration-700" />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
                         <span className="text-lg font-bold text-foreground">{pct}%</span>
                       </div>
                     </div>
                     <span className="text-xs font-medium text-muted-foreground">Project Progress</span>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-5">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-5">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Total Tasks</span>
-                      <ListTodo className="w-4 h-4 text-primary" />
+                      <ListTodo className="w-4 h-4 text-muted-foreground" />
                     </div>
                     <div className="text-2xl font-bold text-foreground">{total}</div>
                     <div className="text-xs text-muted-foreground mt-1">{completed} completed</div>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-5">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-5">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">In Progress</span>
-                      <CircleDot className="w-4 h-4 text-blue-400" />
+                      <CircleDot className="w-4 h-4 text-muted-foreground" />
                     </div>
                     <div className="text-2xl font-bold text-foreground">{inProgress}</div>
                     <div className="text-xs text-muted-foreground mt-1">{pending} pending</div>
-                  </div>
-                  <div className="bg-card border border-border rounded-xl p-5">
+                    </CardContent>
+                  </Card>
+                  <Card className="py-0 shadow-sm border-border/50">
+                    <CardContent className="p-5">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Overdue</span>
                       <Flame className="w-4 h-4 text-red-400" />
                     </div>
                     <div className={`text-2xl font-bold ${overdue > 0 ? 'text-red-400' : 'text-foreground'}`}>{overdue}</div>
                     <div className="text-xs text-muted-foreground mt-1">{overdue > 0 ? 'needs attention' : 'on track'}</div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 </div>
               )
             })()}
 
             {/* AI-Powered Analysis (Gemini) */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-400" /> AI Analysis
-                    <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full font-medium">Gemini</span>
+                    <Sparkles className="w-4 h-4 text-muted-foreground" /> AI Analysis
+                    <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-medium">Gemini</span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-1">Deep analysis of your project powered by Google Gemini AI</p>
                 </div>
-                <button
+                <Button
                   disabled={aiAnalyzing || aiRetryCountdown > 0}
                   onClick={async () => {
                     if (!data || !token) return
@@ -1839,18 +2111,18 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       setAiAnalyzing(false)
                     }
                   }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="gap-2"
                 >
                   {aiAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
                   {aiAnalyzing ? 'Analyzing...' : aiRetryCountdown > 0 ? `Retry in ${aiRetryCountdown}s` : 'Generate Analysis'}
-                </button>
+                </Button>
               </div>
 
               {aiAnalysis ? (
                 <div className="space-y-4">
                   {/* Summary */}
-                  <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
-                    <p className="text-[10px] font-semibold text-purple-400 uppercase tracking-wide mb-1">Summary</p>
+                  <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Summary</p>
                     <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.summary}</p>
                   </div>
 
@@ -1872,11 +2144,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   {/* Suggestions */}
                   {aiAnalysis.suggestions.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Suggestions</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1"><Zap className="w-3 h-3" /> Suggestions</p>
                       <div className="space-y-1.5">
                         {aiAnalysis.suggestions.map((s, i) => (
-                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-emerald-500/5 border border-emerald-500/15">
-                            <span className="text-emerald-400 text-xs mt-0.5">•</span>
+                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 border border-border">
+                            <span className="text-muted-foreground text-xs mt-0.5">•</span>
                             <p className="text-xs text-foreground">{s}</p>
                           </div>
                         ))}
@@ -1886,8 +2158,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
 
                   {/* Team Dynamics */}
                   {aiAnalysis.teamDynamics && (
-                    <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                      <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide mb-1 flex items-center gap-1"><Users className="w-3 h-3" /> Team Dynamics</p>
+                    <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1"><Users className="w-3 h-3" /> Team Dynamics</p>
                       <p className="text-xs text-foreground leading-relaxed">{aiAnalysis.teamDynamics}</p>
                     </div>
                   )}
@@ -1895,11 +2167,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   {/* Next Steps */}
                   {aiAnalysis.nextSteps.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold text-yellow-400 uppercase tracking-wide mb-2 flex items-center gap-1"><Target className="w-3 h-3" /> Recommended Next Steps</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1"><Target className="w-3 h-3" /> Recommended Next Steps</p>
                       <div className="space-y-1.5">
                         {aiAnalysis.nextSteps.map((step, i) => (
-                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-yellow-500/5 border border-yellow-500/15">
-                            <span className="text-yellow-400 text-xs font-bold mt-0.5">{i + 1}.</span>
+                          <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 border border-border">
+                            <span className="text-muted-foreground text-xs font-bold mt-0.5">{i + 1}.</span>
                             <p className="text-xs text-foreground">{step}</p>
                           </div>
                         ))}
@@ -1913,7 +2185,8 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   <p className="text-xs text-muted-foreground">Click &quot;Generate Analysis&quot; to get AI-powered insights about your project&apos;s health, risks, and recommendations.</p>
                 </div>
               )}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Smart Recommendations */}
             {data && (() => {
@@ -1958,9 +2231,10 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
               const recIcons = { danger: <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />, warning: <AlertTriangle className="w-4 h-4 text-yellow-400 shrink-0" />, success: <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />, info: <Info className="w-4 h-4 text-blue-400 shrink-0" /> }
 
               return (
-                <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+                <Card className="py-0 shadow-sm border-border/50">
+                <CardContent className="p-5 space-y-3">
                   <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Brain className="w-4 h-4 text-purple-400" /> Smart Recommendations
+                    <Brain className="w-4 h-4 text-muted-foreground" /> Smart Recommendations
                   </h3>
                   <p className="text-xs text-muted-foreground">AI-generated insights based on your project data, tasks, and team activity</p>
                   <div className="space-y-2">
@@ -1974,12 +2248,14 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       </div>
                     ))}
                   </div>
-                </div>
+                </CardContent>
+                </Card>
               )
             })()}
 
             {/* Blockers & Action Items */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-3">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Flame className="w-4 h-4 text-red-400" /> Blockers & Action Items
               </h3>
@@ -2044,13 +2320,15 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </div>
                 )
               })()}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Team Workload Distribution */}
             {data?.teamStats && data.teamStats.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5 space-y-3">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-400" /> Team Workload
+                  <Users className="w-4 h-4 text-muted-foreground" /> Team Workload
                 </h3>
                 <p className="text-xs text-muted-foreground">Contribution distribution across team members</p>
                 <div className="space-y-2">
@@ -2068,28 +2346,80 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                           <span className="text-xs text-foreground truncate">{member.username}</span>
                         </div>
                         <div className="flex-1 bg-muted/30 rounded-full h-2 overflow-hidden">
-                          <div className="h-full rounded-full bg-indigo-500/60 transition-all" style={{ width: `${pct}%` }} />
+                          <div className="h-full rounded-full bg-foreground/40 transition-all" style={{ width: `${pct}%` }} />
                         </div>
                         <span className="text-[10px] text-muted-foreground w-16 text-right">{member.commits} commits</span>
                       </div>
                     )
                   })}
                 </div>
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Todo List */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Target className="w-4 h-4 text-emerald-400" /> Tasks & Deadlines
+                  <Target className="w-4 h-4 text-muted-foreground" /> Tasks & Deadlines
                 </h3>
-                <button
-                  onClick={() => setShowAddTodo(!showAddTodo)}
-                  className="px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1.5"
-                >
+                <Button size="sm" onClick={() => setShowAddTodo(!showAddTodo)} className="gap-1.5">
                   <Plus className="w-3 h-3" /> Add Task
-                </button>
+                </Button>
+              </div>
+
+              {/* AI Todo Generator */}
+              <div className="bg-muted/30 border border-border rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-xs font-semibold text-foreground">AI Task Generator</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Describe your project and AI will generate a task breakdown for you.</p>
+                <textarea
+                  value={aiProjectDesc}
+                  onChange={(e) => setAiProjectDesc(e.target.value)}
+                  placeholder="e.g. Build a full-stack e-commerce app with Next.js, Stripe payments, user auth, product catalog, shopping cart, and admin dashboard..."
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  rows={3}
+                  maxLength={1000}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!aiProjectDesc.trim() || aiGenerating || !token) return
+                      setAiGenerating(true)
+                      try {
+                        const res = await fetch(`/api/workspaces/${workspaceId}/todos/generate`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            projectDescription: aiProjectDesc.trim(),
+                            existingTodos: todos.map((t) => t.title),
+                          }),
+                        })
+                        const d = await res.json()
+                        if (res.ok) {
+                          setTodos((prev) => [...(d.todos ?? []), ...prev])
+                          toast.success(`Generated ${d.count} tasks`)
+                          setAiProjectDesc('')
+                        } else {
+                          toast.error(d.error || 'Failed to generate tasks')
+                        }
+                      } catch { toast.error('AI task generation failed') }
+                      finally { setAiGenerating(false) }
+                    }}
+                    disabled={aiGenerating || !aiProjectDesc.trim()}
+                    className="px-4 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {aiGenerating ? (
+                      <><div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Generating...</>
+                    ) : (
+                      <><Sparkles className="w-3 h-3" /> Generate Tasks</>
+                    )}
+                  </button>
+                  <span className="text-[10px] text-muted-foreground">{aiProjectDesc.length}/1000</span>
+                </div>
               </div>
 
               {/* Add Todo Form */}
@@ -2271,13 +2601,15 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   })}
                 </div>
               )}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Commit Activity Insights */}
             {data && (
-              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5 space-y-3">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <BarChart2 className="w-4 h-4 text-cyan-400" /> Commit Type Breakdown
+                  <BarChart2 className="w-4 h-4 text-muted-foreground" /> Commit Type Breakdown
                 </h3>
                 <p className="text-xs text-muted-foreground">Distribution of commit types detected by AI classification</p>
                 {(() => {
@@ -2303,14 +2635,16 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   )
                 })()}
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Weekly Velocity */}
             {data && data.recentCommits && data.recentCommits.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5 space-y-3">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-yellow-400" /> Development Velocity
+                  <TrendingUp className="w-4 h-4 text-muted-foreground" /> Development Velocity
                 </h3>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
@@ -2326,21 +2660,23 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     <p className="text-lg font-bold text-foreground">{data.issues?.filter((i: { state: string }) => i.state === 'open').length || 0}</p>
                   </div>
                 </div>
-              </div>
+              </CardContent>
+              </Card>
             )}
           </div>
         )}
 
         {/* SETTINGS TAB */}
         {tab === 'settings' && wsInfo && (
-          <div className="max-w-2xl space-y-6">
+          <div className="max-w-2xl mx-auto space-y-6">
             <div>
               <h2 className="text-sm font-semibold text-foreground">Workspace Settings</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Repository binding, integrations, and team management</p>
             </div>
 
             {/* AR-VCS-014/015: Repository Binding */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <GitBranch className="w-4 h-4" /> Repository Binding
               </h3>
@@ -2429,11 +2765,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   )}
                 </div>
               )}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* AR-VCS-023/024/025/026/027: Collaborators & External Contributors */}
             {repoBinding?.bound && (
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+              <CardContent className="p-0">
                 <div className="px-5 py-4 border-b border-border flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">Repository Collaborators ({repoBinding.collaborators?.length ?? 0})</h3>
@@ -2493,18 +2831,20 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   </div>
                 )}
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Invite */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-4 h-4" /> Team Invitations
               </h3>
-              <button onClick={generateInvite} disabled={inviteLoading} className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2">
+              <Button onClick={generateInvite} disabled={inviteLoading} className="gap-2">
                 {inviteLoading && <div className="w-3 h-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />}
                 {inviteLoading ? 'Generating...' : 'Generate Invite Link (48h)'}
-              </button>
+              </Button>
               {inviteUrl && (
                 <div className="flex items-center gap-2 bg-muted rounded-lg p-3">
                   <code className="flex-1 text-xs text-foreground break-all">{inviteUrl}</code>
@@ -2513,11 +2853,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   </button>
                 </div>
               )}
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Members */}
             {data && (
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <Card className="py-0 shadow-sm border-border/50 overflow-hidden">
+              <CardContent className="p-0">
                 <div className="px-5 py-4 border-b border-border">
                   <h3 className="text-sm font-semibold text-foreground">Team Members ({data.members.length})</h3>
                 </div>
@@ -2525,22 +2867,19 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   {data.members.map((m) => (
                     <div key={m.user?.id} className="px-5 py-3.5 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        {m.user?.avatar_url ? (
-                          <img src={m.user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
-                        ) : (
-                          <div className="w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center">
-                            <span className="text-xs font-bold text-primary">{m.user?.name?.charAt(0).toUpperCase()}</span>
-                          </div>
-                        )}
+                        <Avatar className="size-7">
+                          {m.user?.avatar_url && <AvatarImage src={m.user.avatar_url} />}
+                          <AvatarFallback className="text-xs">{m.user?.name?.charAt(0).toUpperCase()}</AvatarFallback>
+                        </Avatar>
                         <div>
                           <p className="text-xs font-medium text-foreground">{m.user?.name}</p>
                           {m.user?.github_username && <p className="text-[10px] text-muted-foreground">@{m.user.github_username}</p>}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${m.role === 'admin' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                        <Badge variant="outline" className={`text-[10px] ${m.role === 'admin' ? 'bg-primary/20 text-primary' : ''}`}>
                           {m.role}
-                        </span>
+                        </Badge>
                         {isAdmin && m.user?.id !== user?.id && (
                           <button
                             onClick={async () => {
@@ -2573,22 +2912,21 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </div>
                   ))}
                 </div>
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Profile Card */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Users className="w-4 h-4" /> Your Profile
               </h3>
               <div className="flex items-start gap-4">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt="" className="w-14 h-14 rounded-full border-2 border-border" />
-                ) : (
-                  <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center border-2 border-border">
-                    <span className="text-xl font-bold text-primary">{user?.name?.[0]?.toUpperCase()}</span>
-                  </div>
-                )}
+                <Avatar className="size-14 border-2 border-border">
+                  {user?.avatar_url && <AvatarImage src={user.avatar_url} />}
+                  <AvatarFallback className="text-xl">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                </Avatar>
                 <div className="flex-1 space-y-2">
                   {editingProfile ? (
                     <div className="space-y-2">
@@ -2667,20 +3005,21 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   )}
                 </div>
               </div>
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Workspace Rename (admin only) */}
             {isAdmin && (
-              <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+              <Card className="py-0 shadow-sm border-border/50">
+              <CardContent className="p-5 space-y-4">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Pencil className="w-4 h-4" /> Workspace Name
                 </h3>
                 {editingWsName ? (
                   <div className="space-y-2">
-                    <input
+                    <Input
                       value={wsNameInput}
                       onChange={(e) => setWsNameInput(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                       placeholder="Workspace name"
                       maxLength={60}
                     />
@@ -2728,11 +3067,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     </button>
                   </div>
                 )}
-              </div>
+              </CardContent>
+              </Card>
             )}
 
             {/* Notification Preferences */}
-            <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-sm border-border/50">
+            <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Bell className="w-4 h-4" /> Notification Preferences
               </h3>
@@ -2748,26 +3089,22 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       <p className="text-xs font-medium text-foreground">{pref.label}</p>
                       <p className="text-[10px] text-muted-foreground mt-0.5">{pref.desc}</p>
                     </div>
-                    <button
-                      onClick={() => {
+                    <Switch
+                      checked={notifPrefs[pref.key]}
+                      onCheckedChange={() => {
                         setNotifPrefs((prev) => ({ ...prev, [pref.key]: !prev[pref.key] }))
                         toast.success(`${pref.label} ${notifPrefs[pref.key] ? 'disabled' : 'enabled'}`)
                       }}
-                      className={`relative w-9 h-5 rounded-full transition-colors ${
-                        notifPrefs[pref.key] ? 'bg-primary' : 'bg-muted-foreground/30'
-                      }`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                        notifPrefs[pref.key] ? 'translate-x-4' : 'translate-x-0'
-                      }`} />
-                    </button>
+                    />
                   </div>
                 ))}
               </div>
-            </div>
+            </CardContent>
+            </Card>
 
             {/* Danger Zone */}
-            <div className="bg-card border border-red-500/20 rounded-xl p-5 space-y-4">
+            <Card className="py-0 shadow-none border-red-500/20">
+            <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-red-400 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4" /> Danger Zone
               </h3>
@@ -2777,9 +3114,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                     <p className="text-xs font-medium text-foreground">Delete Workspace</p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">Permanently delete this workspace and all its data. This cannot be undone.</p>
                   </div>
-                  <button
+                  <Button
+                    variant="destructive"
+                    size="sm"
                     onClick={async () => {
                       if (deletingWorkspace) return
+                      const confirmed = confirm('Are you sure you want to permanently delete this workspace? This cannot be undone.')
+                      if (!confirmed) return
                       setDeletingWorkspace(true)
                       try {
                         const res = await fetch(`/api/workspaces/${workspaceId}`, {
@@ -2797,11 +3138,11 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       finally { setDeletingWorkspace(false) }
                     }}
                     disabled={deletingWorkspace}
-                    className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+                    className="shrink-0 gap-1.5"
                   >
                     {deletingWorkspace ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" /> : <Trash2 className="w-3 h-3" />}
                     Delete Workspace
-                  </button>
+                  </Button>
                 </div>
               )}
               <div className={`flex items-center justify-between ${isAdmin ? 'pt-2 border-t border-red-500/10' : ''}`}>
@@ -2809,7 +3150,9 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                   <p className="text-xs font-medium text-foreground">Leave Workspace</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Remove yourself from this workspace. You can be re-invited later.</p>
                 </div>
-                <button
+                <Button
+                  variant="destructive"
+                  size="sm"
                   onClick={async () => {
                     try {
                       const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
@@ -2826,12 +3169,13 @@ export default function WorkspaceDashboard({ params }: { params: Promise<{ works
                       }
                     } catch { toast.error('Failed to leave workspace') }
                   }}
-                  className="px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-medium rounded-lg hover:bg-red-500/20 transition-colors flex items-center gap-1.5 shrink-0"
+                  className="shrink-0 gap-1.5"
                 >
                   <LogOut className="w-3 h-3" /> Leave
-                </button>
+                </Button>
               </div>
-            </div>
+            </CardContent>
+            </Card>
           </div>
         )}
       </main>

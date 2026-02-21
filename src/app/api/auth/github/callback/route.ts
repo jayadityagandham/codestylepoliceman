@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
     redirectRes.cookies.delete('github_oauth_state')
     redirectRes.cookies.set('github_token', tokenData.access_token, {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 30,
       path: '/',
